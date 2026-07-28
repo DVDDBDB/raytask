@@ -1,0 +1,24 @@
+{
+  "short_name": "Raybotix",
+  "name": "Raybotix Digital",
+  "description": "Task workflow, timer, and productivity platform for Raybotix Digital.",
+  "icons": [
+    {
+      "src": "/logo192.svg",
+      "type": "image/svg+xml",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/logo512.svg",
+      "type": "image/svg+xml",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#E63946",
+  "background_color": "#FDFBF7"
+}
