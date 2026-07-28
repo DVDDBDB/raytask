@@ -4,6 +4,7 @@ from models import MessageCreate, ConversationCreate
 from auth import get_current_user
 from db import db
 from utils import now_iso, push_notification
+from ws_manager import manager
 import uuid
 
 router = APIRouter(prefix="/messages", tags=["messages"])
@@ -112,12 +113,17 @@ async def send_message(payload: MessageCreate, user=Depends(get_current_user)):
     }
     await db.messages.insert_one(msg)
     await db.conversations.update_one({"id": conv_id}, {"$set": {"updated_at": now_iso()}})
-    # notify other participants
+    msg.pop("_id", None)
+    # Broadcast the message via WebSocket to all participants (incl. sender for
+    # multi-tab sync) and push notification to non-senders.
+    await manager.send_to_users(
+        conv["participant_ids"],
+        {"type": "message", "conversation_id": conv_id, "message": msg},
+    )
     for pid in conv["participant_ids"]:
         if pid != user["id"]:
             await push_notification(pid, "new_message",
                                     f"New message from {user['first_name']}",
                                     payload.body[:80],
                                     link_type="conversation", link_id=conv_id)
-    msg.pop("_id", None)
     return msg

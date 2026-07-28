@@ -7,8 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, Filter } from "lucide-react";
+import { Plus, Search, Filter, FileSpreadsheet } from "lucide-react";
 import { TASK } from "@/constants/testIds";
+import { downloadFromPath } from "@/lib/uploads";
 import EmptyState from "@/components/EmptyState";
 
 const VIEWS = [
@@ -83,13 +84,25 @@ export default function Tasks() {
             {isAdmin ? "All Tasks" : "My Tasks"}
           </h1>
         </div>
-        <Button
-          onClick={() => setCreateOpen(true)}
-          className="gap-2 rounded-full"
-          data-testid={TASK.createButton}
-        >
-          <Plus className="w-4 h-4" /> New task
-        </Button>
+        <div className="flex items-center gap-2">
+          {canManageTasks && (
+            <Button
+              variant="outline"
+              onClick={() => downloadFromPath("/exports/tasks.xlsx", "raybotix-tasks.xlsx")}
+              className="gap-2 rounded-full"
+              data-testid="export-tasks-button"
+            >
+              <FileSpreadsheet className="w-4 h-4" /> Export
+            </Button>
+          )}
+          <Button
+            onClick={() => setCreateOpen(true)}
+            className="gap-2 rounded-full"
+            data-testid={TASK.createButton}
+          >
+            <Plus className="w-4 h-4" /> New task
+          </Button>
+        </div>
       </div>
 
       <Tabs value={view} onValueChange={setView}>

@@ -3,6 +3,9 @@ import api from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { formatDuration, formatINR } from "@/lib/format";
 import { UserAvatar } from "@/components/UserAvatar";
+import { Button } from "@/components/ui/button";
+import { downloadFromPath } from "@/lib/uploads";
+import { FileSpreadsheet } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, ResponsiveContainer, CartesianGrid, Tooltip,
   LineChart, Line,
@@ -22,11 +25,23 @@ export default function Analytics() {
 
   return (
     <div className="space-y-8" data-testid="analytics-page">
-      <div>
-        <div className="text-overline">Analytics</div>
-        <h1 className="text-3xl sm:text-4xl font-semibold" style={{ fontFamily: "Outfit" }}>
-          {isAdmin ? "Team performance" : "My productivity"}
-        </h1>
+      <div className="flex items-end justify-between flex-wrap gap-3">
+        <div>
+          <div className="text-overline">Analytics</div>
+          <h1 className="text-3xl sm:text-4xl font-semibold" style={{ fontFamily: "Outfit" }}>
+            {isAdmin ? "Team performance" : "My productivity"}
+          </h1>
+        </div>
+        {canManageTasks && (
+          <Button
+            variant="outline"
+            onClick={() => downloadFromPath("/exports/productivity.xlsx", "raybotix-productivity.xlsx")}
+            className="gap-2 rounded-full"
+            data-testid="export-productivity-button"
+          >
+            <FileSpreadsheet className="w-4 h-4" /> Export Excel
+          </Button>
+        )}
       </div>
 
       {/* My daily hours */}

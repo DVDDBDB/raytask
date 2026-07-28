@@ -6,13 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatDateTime } from "@/lib/format";
 import { toast } from "sonner";
-import { Send, Plus } from "lucide-react";
+import { Send, Plus, Radio } from "lucide-react";
 import { MSG } from "@/constants/testIds";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
-import EmptyState from "@/components/EmptyState";
+import { connectWS } from "@/lib/ws";
 
 export default function Messages() {
   const { user } = useAuth();
@@ -23,13 +23,41 @@ export default function Messages() {
   const [users, setUsers] = useState([]);
   const [newOpen, setNewOpen] = useState(false);
   const [pickedIds, setPickedIds] = useState([]);
+  const [wsLive, setWsLive] = useState(false);
   const scrollRef = useRef(null);
+  const selectedRef = useRef(null);
+
+  useEffect(() => { selectedRef.current = selected; }, [selected]);
 
   const loadConversations = () => api.get("/messages/conversations").then((r) => setConversations(r.data));
-  useEffect(() => { loadConversations(); api.get("/users").then((r) => setUsers(r.data)); }, []);
+
   useEffect(() => {
-    const iv = setInterval(loadConversations, 8000);
-    return () => clearInterval(iv);
+    loadConversations();
+    api.get("/users").then((r) => setUsers(r.data));
+  }, []);
+
+  // Single global WebSocket for messages + notifications
+  useEffect(() => {
+    const conn = connectWS({
+      onOpen: () => setWsLive(true),
+      onClose: () => setWsLive(false),
+      onMessage: (evt) => {
+        if (evt.type !== "message") return;
+        const active = selectedRef.current;
+        if (active && active.id === evt.conversation_id) {
+          setMessages((m) => {
+            if (m.some((x) => x.id === evt.message.id)) return m;
+            const withoutOptimistic = m.filter((x) =>
+              !(x.id?.startsWith("temp-") && x.body === evt.message.body && x.sender_id === evt.message.sender_id)
+            );
+            return [...withoutOptimistic, evt.message];
+          });
+          setTimeout(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }), 40);
+        }
+        loadConversations();
+      },
+    });
+    return () => conn.close();
   }, []);
 
   const loadMessages = async (convId) => {
@@ -38,18 +66,12 @@ export default function Messages() {
     setTimeout(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }), 40);
   };
 
-  useEffect(() => {
-    if (!selected) return;
-    loadMessages(selected.id);
-    const iv = setInterval(() => loadMessages(selected.id), 4000);
-    return () => clearInterval(iv);
-  }, [selected]);
+  useEffect(() => { if (selected) loadMessages(selected.id); }, [selected]);
 
   const send = async () => {
     if (!text.trim() || !selected) return;
     const body = text.trim();
     setText("");
-    // Optimistic append (real-time feel):
     const optimistic = {
       id: "temp-" + Date.now(),
       conversation_id: selected.id,
@@ -63,10 +85,10 @@ export default function Messages() {
     setTimeout(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }), 20);
     try {
       await api.post("/messages", { conversation_id: selected.id, body });
-      loadMessages(selected.id);
-      loadConversations();
+      // WS broadcast will confirm & replace optimistic entry
     } catch (e) {
       toast.error("Failed to send");
+      setMessages((m) => m.filter((x) => x.id !== optimistic.id));
     }
   };
 
@@ -83,9 +105,16 @@ export default function Messages() {
 
   return (
     <div className="space-y-4" data-testid="messages-page">
-      <div className="flex items-end justify-between">
+      <div className="flex items-end justify-between flex-wrap gap-4">
         <div>
-          <div className="text-overline">Team chat</div>
+          <div className="text-overline flex items-center gap-2">
+            Team chat
+            <span className={`inline-flex items-center gap-1 text-[10px] uppercase tracking-widest px-1.5 h-4 rounded ${
+              wsLive ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/30" : "bg-muted text-muted-foreground border border-border"
+            }`} data-testid="ws-status">
+              <Radio className="w-2.5 h-2.5" /> {wsLive ? "Live" : "Reconnecting"}
+            </span>
+          </div>
           <h1 className="text-3xl sm:text-4xl font-semibold" style={{ fontFamily: "Outfit" }}>Messages</h1>
         </div>
         <Button onClick={() => setNewOpen(true)} className="gap-2 rounded-full" data-testid={MSG.newConversation}>

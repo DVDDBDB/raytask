@@ -103,6 +103,13 @@ class ProjectUpdate(BaseModel):
 
 
 # ---------- Tasks ----------
+class Recurrence(BaseModel):
+    enabled: bool = False
+    frequency: str = "weekly"  # daily | weekly | monthly
+    next_run_at: Optional[str] = None
+    last_run_at: Optional[str] = None
+
+
 class TaskCreate(BaseModel):
     title: str
     description: str = ""
@@ -118,6 +125,7 @@ class TaskCreate(BaseModel):
     reference_links: List[str] = Field(default_factory=list)
     attachments: List[Dict[str, Any]] = Field(default_factory=list)
     parent_task_id: Optional[str] = None
+    recurrence: Optional[Recurrence] = None
 
 
 class TaskUpdate(BaseModel):
@@ -134,6 +142,7 @@ class TaskUpdate(BaseModel):
     instructions: Optional[str] = None
     reference_links: Optional[List[str]] = None
     attachments: Optional[List[Dict[str, Any]]] = None
+    recurrence: Optional[Recurrence] = None
 
 
 class HandoffRequest(BaseModel):

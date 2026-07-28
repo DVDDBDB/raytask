@@ -12,6 +12,7 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import UserSelect from "@/components/UserSelect";
+import AttachmentUploader from "@/components/AttachmentUploader";
 import api from "@/lib/api";
 import { toast } from "sonner";
 import { TASK } from "@/constants/testIds";
@@ -31,7 +32,7 @@ export default function CompleteTaskDialog({ open, onOpenChange, task, users = [
   const [next, setNext] = useState({
     title: "", description: "", priority: "Medium",
     estimated_duration_minutes: 60, due_date: "", scheduled_start_date: "",
-    instructions: "",
+    instructions: "", attachments: [],
   });
   const [saving, setSaving] = useState(false);
 
@@ -200,6 +201,15 @@ export default function CompleteTaskDialog({ open, onOpenChange, task, users = [
                   <Textarea rows={3}
                     value={next.instructions}
                     onChange={(e) => setNext({ ...next, instructions: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Attachments</Label>
+                  <AttachmentUploader
+                    value={next.attachments}
+                    onChange={(v) => setNext({ ...next, attachments: v })}
+                    testId="next-task-attachments"
+                    compact
                   />
                 </div>
               </div>

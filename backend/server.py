@@ -18,7 +18,12 @@ from routes_messages import router as messages_router  # noqa: E402
 from routes_notifications import router as notifications_router, activity_router  # noqa: E402
 from routes_analytics import router as analytics_router  # noqa: E402
 from routes_settings import router as settings_router  # noqa: E402
+from routes_files import router as files_router  # noqa: E402
+from routes_exports import router as exports_router  # noqa: E402
+from routes_ws import router as ws_router  # noqa: E402
 from seed import seed  # noqa: E402
+import recurring  # noqa: E402
+import asyncio  # noqa: E402
 
 app = FastAPI(title="Raybotix Digital API")
 
@@ -39,6 +44,9 @@ api_router.include_router(notifications_router)
 api_router.include_router(activity_router)
 api_router.include_router(analytics_router)
 api_router.include_router(settings_router)
+api_router.include_router(files_router)
+api_router.include_router(exports_router)
+api_router.include_router(ws_router)
 
 app.include_router(api_router)
 
@@ -61,6 +69,12 @@ async def on_startup():
         logger.info("Seed complete")
     except Exception as e:
         logger.exception("Seed failed: %s", e)
+    # Kick off recurring-task scheduler
+    try:
+        recurring.start_scheduler(asyncio.get_event_loop())
+        logger.info("Recurring scheduler started")
+    except Exception as e:
+        logger.exception("Scheduler failed to start: %s", e)
 
 
 @app.on_event("shutdown")

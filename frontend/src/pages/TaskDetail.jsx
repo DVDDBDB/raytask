@@ -7,6 +7,8 @@ import CompleteTaskDialog from "@/components/CompleteTaskDialog";
 import WorkflowTimeline from "@/components/WorkflowTimeline";
 import { UserAvatar } from "@/components/UserAvatar";
 import { PriorityBadge, StatusBadge } from "@/components/Badges";
+import AttachmentUploader from "@/components/AttachmentUploader";
+import AttachmentList from "@/components/AttachmentList";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -17,7 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { formatDate, formatDateTime, formatDuration, formatINR, userLabel } from "@/lib/format";
-import { ArrowLeft, IndianRupee, ChevronRight, RotateCcw, MessagesSquare, FolderKanban, User } from "lucide-react";
+import { ArrowLeft, IndianRupee, ChevronRight, RotateCcw, MessagesSquare, FolderKanban, User, Paperclip, Repeat } from "lucide-react";
 
 export default function TaskDetail() {
   const { id } = useParams();
@@ -186,6 +188,28 @@ export default function TaskDetail() {
             </div>
           </div>
 
+          {/* Attachments */}
+          <div className="card-flat p-6">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-overline flex items-center gap-2"><Paperclip className="w-3.5 h-3.5" /> Attachments</div>
+            </div>
+            <AttachmentList attachments={task.attachments || []} />
+            {(isAssignee || canManageTasks) && (
+              <div className="mt-3">
+                <AttachmentUploader
+                  value={[]}
+                  onChange={async (newlyAdded) => {
+                    const merged = [...(task.attachments || []), ...newlyAdded];
+                    await api.patch(`/tasks/${task.id}`, { attachments: merged });
+                    load();
+                  }}
+                  testId="task-detail-attachments"
+                  compact
+                />
+              </div>
+            )}
+          </div>
+
           {/* Comments */}
           <div className="card-flat p-6">
             <div className="text-overline mb-3">Comments</div>
@@ -289,6 +313,12 @@ export default function TaskDetail() {
             {task.creator && (
               <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
                 <User className="w-3.5 h-3.5" /> Created by {task.creator.first_name} — {task.creator.designation}
+              </div>
+            )}
+            {task.recurrence?.enabled && (
+              <div className="border border-primary/30 bg-primary/5 rounded-md p-3 text-[12px] flex items-center gap-2 text-primary">
+                <Repeat className="w-3.5 h-3.5" />
+                Recurring: repeats {task.recurrence.frequency}
               </div>
             )}
           </div>

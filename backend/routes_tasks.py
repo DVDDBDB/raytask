@@ -130,6 +130,10 @@ async def create_task(payload: TaskCreate, user=Depends(get_current_user)):
         "workflow": [],
         "reassignment_history": [],
     }
+    # Seed recurrence next_run_at if enabled but unset
+    if payload.recurrence and payload.recurrence.enabled and not payload.recurrence.next_run_at:
+        from recurring import compute_next_run
+        doc["recurrence"]["next_run_at"] = compute_next_run(payload.recurrence.model_dump(), datetime.now(timezone.utc)).isoformat()
     # If scheduled_start_date is in the future, mark as Scheduled
     sched = _iso_to_dt(payload.scheduled_start_date)
     if sched and sched > datetime.now(timezone.utc) and payload.status == "Assigned":
