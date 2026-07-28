@@ -1,0 +1,158 @@
+{
+  "brand_identity": {
+    "name": "Raybotix Digital",
+    "vibe": "Professional, warm, distinctive, agency-grade, productivity-driven."
+  },
+  "theme": {
+    "mode": "system",
+    "description": "Supports light, dark, and system themes with a toggle. Priority is a warm off-white in light mode and a deep near-black in dark mode."
+  },
+  "typography": {
+    "fonts": {
+      "headings": "Outfit",
+      "body": "Manrope",
+      "mono": "JetBrains Mono"
+    },
+    "hierarchy": {
+      "h1": "text-4xl sm:text-5xl lg:text-6xl tracking-tight leading-none font-semibold",
+      "h2": "text-2xl sm:text-3xl lg:text-4xl tracking-tight font-medium",
+      "h3": "text-xl sm:text-2xl font-medium",
+      "h4": "text-lg sm:text-xl font-medium",
+      "body": "text-base leading-relaxed",
+      "small": "text-sm text-muted-foreground",
+      "overline": "text-xs uppercase tracking-[0.2em] font-semibold"
+    },
+    "instructions": "Import Outfit, Manrope, and JetBrains Mono from Google Fonts. NEVER use Inter, Space Grotesk, Roboto, or Lato."
+  },
+  "colors": {
+    "strategy": "Warm & Organic High-Contrast. Avoiding standard SaaS blues and purple gradients. Teal is strictly forbidden in dashboards.",
+    "light": {
+      "background": "#FDFBF7",
+      "surface": "#FFFFFF",
+      "primary": "#E63946",
+      "primary_hover": "#D92E3A",
+      "secondary": "#D97706",
+      "text": "#1A1818",
+      "text_muted": "#6B6565",
+      "border": "#E5E0D8"
+    },
+    "dark": {
+      "background": "#110F0F",
+      "surface": "#1A1717",
+      "primary": "#FF4D5A",
+      "primary_hover": "#FF6B76",
+      "secondary": "#F59E0B",
+      "text": "#F5F2F0",
+      "text_muted": "#A19D9D",
+      "border": "#2D2626"
+    },
+    "roles": {
+      "super_admin": {
+        "color": "#1E293B",
+        "bg_light": "#F1F5F9",
+        "bg_dark": "#0F172A"
+      },
+      "admin": {
+        "color": "#E63946",
+        "bg_light": "#FFF0F1",
+        "bg_dark": "#3B1216"
+      },
+      "manager": {
+        "color": "#D97706",
+        "bg_light": "#FEF3C7",
+        "bg_dark": "#452603"
+      },
+      "team_member": {
+        "color": "#3B82F6",
+        "bg_light": "#EFF6FF",
+        "bg_dark": "#1E3A8A"
+      }
+    },
+    "status": {
+      "todo": "#6B7280",
+      "in_progress": "#F59E0B",
+      "review": "#8B5CF6",
+      "completed": "#10B981"
+    }
+  },
+  "grids_and_layouts": {
+    "dashboard_grid": "High Density Grid (MODE B). grid-cols-1 md:grid-cols-3 lg:grid-cols-4 with gap-4 or gap-6.",
+    "spacing": "Generous Spacing Philosophy. Use p-6 to p-8 inside cards. Use wide gaps where data isn't dense.",
+    "sidebar": "Compact, distraction-free. Monochrome iconography. Distinguishes roles visually.",
+    "alignment": "Mobile-first. Left-align dense content. Top-level alignments must be optical, not just geometrical."
+  },
+  "component_guidelines": {
+    "cards": "Subtle roundness (max 8px radius). Flat background with 1px subtle border. No massive drop shadows. Use Neumorphism strictly for small interactive widgets if at all, else stick to flat 1px borders.",
+    "buttons": "Pill-shaped or max 8px rounded corners. Crisp edges. Include hover state with slight lift (-translate-y-1) and color shift.",
+    "timer_widget": "Use 'JetBrains Mono' for the timer display. Make it a prominent Floating Action card or docked widget with pulse animation when active.",
+    "workflow_timeline": "Avatar circles connected by 2px solid lines (colored by status). Ensure avatars overlap slightly if grouped.",
+    "calendar": "Custom header with Outfit font. Drag-and-drop enabled. Highlight current day with primary color (Ember Red).",
+    "forms": "Use Shadcn components. Inputs should have 1px borders, subtle focus rings (focus:ring-2 focus:ring-primary/50). Avoid native HTML inputs."
+  },
+  "visual_enhancers": {
+    "glassmorphism": "Use ONLY for sticky headers or floating navs. backdrop-blur-xl with bg-white/70 (light) or bg-black/60 (dark). MUST have a 1px delicate inner stroke.",
+    "empty_states": "Use ASCII art or highly curated minimal SVGs. Never show a blank chart. Include a guided CTA.",
+    "badges": "Sharp, minimal height (h-6), uppercase text, max 4px radius. Use role colors or status colors with 10% opacity background."
+  },
+  "motion": {
+    "hover_states": "Always transition: transform 0.2s ease, opacity 0.2s ease. Explicitly set hover colors.",
+    "micro_interactions": "Active timers should have a subtle ping/pulse effect. Task completion should have a staggered list entrance animation.",
+    "accessibility": "Respect prefers-reduced-motion."
+  },
+  "media": {
+    "image_urls": [
+      {
+        "url": "https://images.unsplash.com/photo-1494790108377-be9c29b29330?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxOTF8MHwxfHNlYXJjaHwzfHxwcm9mZXNzaW9uYWwlMjBoZWFkc2hvdCUyMHBvcnRyYWl0fGVufDB8fHx8MTc4NTE1MTY3Nnww&ixlib=rb-4.1.0&q=85",
+        "description": "Female team member avatar",
+        "category": "avatars"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1699899657680-421c2c2d5064?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxOTF8MHwxfHNlYXJjaHw0fHxwcm9mZXNzaW9uYWwlMjBoZWFkc2hvdCUyMHBvcnRyYWl0fGVufDB8fHx8MTc4NTE1MTY3Nnww&ixlib=rb-4.1.0&q=85",
+        "description": "Female manager avatar",
+        "category": "avatars"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxOTF8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBoZWFkc2hvdCUyMHBvcnRyYWl0fGVufDB8fHx8MTc4NTE1MTY3Nnww&ixlib=rb-4.1.0&q=85",
+        "description": "Male admin avatar",
+        "category": "avatars"
+      },
+      {
+        "url": "https://images.pexels.com/photos/37148308/pexels-photo-37148308.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Male super admin avatar",
+        "category": "avatars"
+      },
+      {
+        "url": "https://images.pexels.com/photos/23496667/pexels-photo-23496667.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Team collaboration for login/signup screen background",
+        "category": "backgrounds"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1542966336-22953b5f7404?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzZ8MHwxfHNlYXJjaHwxfHxkYXJrJTIwZW1iZXIlMjByZWQlMjBhYnN0cmFjdCUyMHRleHR1cmV8ZW58MHx8fHwxNzgyODgzNzE0fDA&ixlib=rb-4.1.0&q=85",
+        "description": "Abstract ember red texture for dark mode hero/splash screen",
+        "category": "textures"
+      }
+    ]
+  },
+  "instructions_to_main_agent": [
+    "Ensure the PWA manifest is correctly set up with custom icons and splash screen references.",
+    "Implement the role-based dashboard views logically, checking user roles before rendering specific components.",
+    "Currency must be hardcoded or formatted strictly in Indian Rupees (₹).",
+    "Use Phosphor Icons (@phosphor-icons/react) for dense, professional UI iconography.",
+    "For toasts, use 'sonner' and style it to match the warm agency theme.",
+    "Create a responsive Sidebar that collapses to icons on medium screens and is hidden behind a hamburger on mobile.",
+    "Use Recharts or Shadcn Charts for the analytics, styling them with the primary/secondary colors."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "Do not converge toward generic, 'on distribution' outputs. Avoid the 'AI slop' aesthetic.",
+    "DO NOT use dark colors as gradients. Use solid colors with noise or texture if needed.",
+    "Do not make generic centered layouts. Left-align dense content.",
+    "Create depth through layered design elements with z-index hierarchy and 1px borders.",
+    "DO NOT apply universal transitions (e.g., transition: all). Target specific properties like transform and opacity.",
+    "DO NOT center align the app container in App.css.",
+    "NEVER use AI assistant emoji characters like 🤖🧠💭💡🔮🎯 for icons.",
+    "Every interaction needs micro-animations (hover, active, focus).",
+    "All interactive and key informational elements MUST include a 'data-testid' attribute (e.g., data-testid='login-submit-button').",
+    "Do not use transparent backgrounds in headers or overlays where text visibility drops.",
+    "Share guidelines for .js files, NOT .tsx files."
+  ]
+}
