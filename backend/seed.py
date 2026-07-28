@@ -14,12 +14,45 @@ def _iso(dt):
     return dt.isoformat()
 
 
+async def _ensure_super_admin(email: str, first_name: str, last_name: str, password: str = "Raybotix@2026"):
+    """Idempotently ensure a Super Admin exists (created active, ready to sign in)."""
+    existing = await db.users.find_one({"email": email.lower()})
+    now = _iso(_now())
+    if existing:
+        await db.users.update_one(
+            {"id": existing["id"]},
+            {"$set": {
+                "role": "super_admin", "status": "active",
+                "first_name": first_name, "last_name": last_name,
+                "updated_at": now,
+            }},
+        )
+        return
+    await db.users.insert_one({
+        "id": uuid.uuid4().hex,
+        "email": email.lower(),
+        "first_name": first_name, "last_name": last_name,
+        "designation": "Manager", "role": "super_admin",
+        "status": "active", "avatar_url": "",
+        "monthly_salary": 0.0,
+        "working_hours_per_day": 8.0, "working_days_per_month": 25,
+        "theme": "system", "permissions": [],
+        "password_hash": hash_password(password),
+        "last_login": None,
+        "created_at": now, "updated_at": now,
+    })
+
+
 async def seed():
     # Company settings
     if not await db.settings.find_one({"id": "company"}):
         s = CompanySettings().model_dump()
         s["id"] = "company"
         await db.settings.insert_one(s)
+
+    # Additional Super Admins — always ensured (idempotent, does not overwrite password)
+    await _ensure_super_admin("ai.jaineel@gmail.com", "Jaineel", "Gandhi")
+    await _ensure_super_admin("web.raybotix@gmail.com", "Jinal", "Dodiya")
 
     # Super admin
     existing_sa = await db.users.find_one({"email": "superadmin@raybotix.com"})
