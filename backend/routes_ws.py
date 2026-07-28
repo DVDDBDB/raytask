@@ -11,10 +11,12 @@ router = APIRouter()
 async def ws_endpoint(ws: WebSocket, token: str = Query("")):
     payload = decode_token(token)
     if not payload:
+        await ws.accept()
         await ws.close(code=4401)
         return
     user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0, "password_hash": 0})
     if not user or user.get("status") != "active":
+        await ws.accept()
         await ws.close(code=4403)
         return
     user_id = user["id"]

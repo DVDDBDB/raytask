@@ -39,12 +39,18 @@ Build a Digital Marketing Team Task Management PWA for **Raybotix Digital** (rol
 ## Test credentials
 See `/app/memory/test_credentials.md`.
 
-## Prioritized backlog (v2)
-- **P0**: WebSocket-based real-time messaging (replace 4s polling), email verification via Resend, avatar/attachment upload via Emergent Object Storage
-- **P1**: Drag-and-drop task rescheduling on calendar, Excel/CSV/PDF exports, weekly/monthly efficiency comparison charts, task tagging inside messages with rich preview
-- **P2**: Salary history & bonus tracking, Slack/Telegram notification bridges, mention `@name` auto-suggest, offline PWA caching
+## Implemented — Feb 2026 (v2)
+- **Attachments Upload** — drop-zone on Create Task, Complete/Handoff (next task) and Task Detail. Files stored in Emergent Object Storage; metadata in `db.files`. Images preview inline via `?auth=<jwt>` URL; downloads via authenticated blob.
+- **Live Messaging** — FastAPI WebSocket at `/api/ws?token=…`. In-process `ConnectionManager` broadcasts `{type:'message'}` to all conversation participants (incl. sender) instantly. Auto-reconnect + ping/pong keep-alive; live/reconnecting badge in UI.
+- **Excel Exports** — openpyxl reports at `/api/exports/tasks.xlsx`, `/costs.xlsx` (Super Admin/Admin), `/productivity.xlsx`. Export buttons in Tasks, Cost Analytics, Analytics pages.
+- **Recurring Tasks** — `recurrence: {enabled, frequency, next_run_at, last_run_at}` on Task. Background asyncio scheduler ticks every 5 min and clones templates to fresh tasks (daily/weekly/monthly). Toggle + frequency picker inside Create Task dialog; recurring badge on Task detail.
 
-## Known limitations (v1)
-- Real-time updates are polling-based (fine at team scale, ok for the MVP)
-- File uploads use avatar URL only (no upload; add object storage next)
-- No email verification (approval is manual by Super Admin)
+## Prioritized backlog (v3)
+- **P0**: Email verification via Resend, mention `@name` auto-suggest, task tagging inside chat with rich preview
+- **P1**: Drag-and-drop task rescheduling on calendar, CSV/PDF exports, weekly/monthly efficiency comparison charts, offline PWA caching
+- **P2**: Salary history & bonus tracking, Slack/Telegram notification bridges, calendar-accurate monthly recurrence, streaming uploads for >25 MB files
+
+## Known limitations
+- Recurring "monthly" uses a 30-day step (not calendar-month accurate)
+- `_tick` scheduler is single-process (fine for one backend pod; add distributed lock for horizontal scale)
+- Uploads read into memory before size check (25 MB hard cap)
