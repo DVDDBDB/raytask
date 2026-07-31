@@ -1,5 +1,5 @@
 """Excel export routes (openpyxl)."""
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Response, Query
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from io import BytesIO
@@ -77,67 +77,144 @@ async def export_tasks(user=Depends(require_roles("super_admin", "admin", "manag
 
 
 @router.get("/costs.xlsx")
-async def export_costs(user=Depends(require_roles("super_admin", "admin"))):
-    users = {u["id"]: u for u in await db.users.find({}, {"_id": 0}).to_list(500)}
-    tasks = {t["id"]: t for t in await db.tasks.find({}, {"_id": 0}).to_list(5000)}
-    projects = {p["id"]: p for p in await db.projects.find({}, {"_id": 0}).to_list(500)}
-    sessions = await db.timer_sessions.find({}, {"_id": 0}).to_list(50000)
+async def export_costs(
+    range: str = Query("month"),
+    start: str = "",
+    end: str = "",
+    project_id: str = "",
+    user_id: str = "",
+    user=Depends(require_roles("super_admin", "admin")),
+):
+    """Excel export mirroring /analytics/costs (respects the same filters)."""
+    from routes_analytics import _range_window, _employee_costs, _session_cost_and_seconds
+
+    win_start, win_end, label = _range_window(range, start, end)
+    cost_map = await _employee_costs()
+
+    users = {u["id"]: u for u in await db.users.find({}, {"_id": 0}).to_list(1000)}
+    tasks = {t["id"]: t for t in await db.tasks.find({}, {"_id": 0}).to_list(10000)}
+    projects = {p["id"]: p for p in await db.projects.find({}, {"_id": 0}).to_list(1000)}
+    sessions = await db.timer_sessions.find({
+        "$or": [
+            {"started_at": {"$gte": win_start.isoformat(), "$lte": win_end.isoformat()}},
+            {"ended_at": None},
+            {"ended_at": {"$gte": win_start.isoformat()}},
+        ]
+    }, {"_id": 0}).to_list(200000)
+
+    def _pass_filters(sess, task):
+        if user_id and sess.get("user_id") != user_id:
+            return False
+        if project_id and (not task or task.get("project_id") != project_id):
+            return False
+        return True
 
     wb = Workbook()
-    # Sheet 1: Task cost breakdown
+    # Sheet 1: Cost per Task
     ws = wb.active
-    ws.title = "Task cost"
-    _apply_header(ws, ["Task", "Project", "Employee", "Designation", "Hours",
-                       "Hourly (₹)", "Contribution (₹)"])
+    ws.title = "Cost per Task"
+    _apply_header(ws, ["Range", "Task", "Project", "Assignee", "Designation",
+                       "Hours", "Hourly (₹)", "Cost (₹)"])
+    task_agg = {}
     for s in sessions:
-        u = users.get(s["user_id"])
-        t = tasks.get(s["task_id"])
-        if not u or not t:
+        info = cost_map.get(s.get("user_id"))
+        t = tasks.get(s.get("task_id"))
+        if not info or not t:
             continue
-        wh = u.get("working_hours_per_day", 8) or 8
-        wd = u.get("working_days_per_month", 25) or 25
-        salary = u.get("monthly_salary", 0) or 0
-        mh = wh * wd
-        hourly = (salary / mh) if mh else 0
-        hours = (s.get("duration_seconds", 0) or 0) / 3600.0
+        if not _pass_filters(s, t):
+            continue
+        cost, secs = _session_cost_and_seconds(s, info["hourly"], win_start, win_end)
+        if secs <= 0:
+            continue
+        row = task_agg.setdefault(t["id"], {"cost": 0.0, "seconds": 0})
+        row["cost"] += cost
+        row["seconds"] += secs
+    for tid, v in sorted(task_agg.items(), key=lambda kv: kv[1]["cost"], reverse=True):
+        t = tasks.get(tid, {})
+        a = users.get(t.get("assignee_id"))
         p = projects.get(t.get("project_id"))
+        info = cost_map.get(t.get("assignee_id"))
+        hourly = info["hourly"] if info else 0
         ws.append([
-            t.get("title", ""), (p or {}).get("name", ""),
-            u.get("first_name", ""), u.get("designation", ""),
-            round(hours, 2), round(hourly, 2), round(hours * hourly, 2),
+            label, t.get("title", ""), (p or {}).get("name", ""),
+            (a or {}).get("first_name", ""), (a or {}).get("designation", ""),
+            round(v["seconds"] / 3600.0, 2), round(hourly, 2), round(v["cost"], 2),
         ])
     _autosize(ws)
 
-    # Sheet 2: Project totals
-    ws2 = wb.create_sheet("Project cost")
-    _apply_header(ws2, ["Project", "Company", "Total ₹", "This month ₹"])
-    now = datetime.now(timezone.utc)
-    month_key = now.strftime("%Y-%m")
-    proj_totals = {}
-    proj_month = {}
+    # Sheet 2: Cost per Project
+    ws2 = wb.create_sheet("Cost per Project")
+    _apply_header(ws2, ["Project", "Company", "Hours", "Cost (₹)"])
+    proj_agg = {}
     for s in sessions:
-        u = users.get(s["user_id"])
-        t = tasks.get(s["task_id"])
-        if not u or not t:
+        info = cost_map.get(s.get("user_id"))
+        t = tasks.get(s.get("task_id"))
+        if not info or not t:
             continue
-        wh = u.get("working_hours_per_day", 8) or 8
-        wd = u.get("working_days_per_month", 25) or 25
-        salary = u.get("monthly_salary", 0) or 0
-        mh = wh * wd
-        hourly = (salary / mh) if mh else 0
-        cost = (s.get("duration_seconds", 0) / 3600.0) * hourly
-        pid = t.get("project_id")
-        if not pid:
+        if not _pass_filters(s, t):
             continue
-        proj_totals[pid] = proj_totals.get(pid, 0) + cost
-        started = s.get("started_at", "")
-        if isinstance(started, str) and started.startswith(month_key):
-            proj_month[pid] = proj_month.get(pid, 0) + cost
-    for pid, total in proj_totals.items():
+        cost, secs = _session_cost_and_seconds(s, info["hourly"], win_start, win_end)
+        if secs <= 0:
+            continue
+        pid = t.get("project_id") or "__none__"
+        row = proj_agg.setdefault(pid, {"cost": 0.0, "seconds": 0})
+        row["cost"] += cost
+        row["seconds"] += secs
+    for pid, v in sorted(proj_agg.items(), key=lambda kv: kv[1]["cost"], reverse=True):
         p = projects.get(pid, {})
-        ws2.append([p.get("name", ""), p.get("company_name", ""),
-                    round(total, 2), round(proj_month.get(pid, 0), 2)])
+        ws2.append([
+            p.get("name", "No project"), p.get("company_name", ""),
+            round(v["seconds"] / 3600.0, 2), round(v["cost"], 2),
+        ])
     _autosize(ws2)
+
+    # Sheet 3: Cost per Employee (monthly total)
+    ws3 = wb.create_sheet("Cost per Employee")
+    _apply_header(ws3, ["Employee", "Designation", "Range hours", "Range cost (₹)",
+                        "Monthly hours", "Monthly cost (₹)"])
+    emp_agg = {}
+    for s in sessions:
+        info = cost_map.get(s.get("user_id"))
+        t = tasks.get(s.get("task_id"))
+        if not info or not t:
+            continue
+        if not _pass_filters(s, t):
+            continue
+        cost, secs = _session_cost_and_seconds(s, info["hourly"], win_start, win_end)
+        if secs <= 0:
+            continue
+        row = emp_agg.setdefault(s["user_id"], {"cost": 0.0, "seconds": 0})
+        row["cost"] += cost
+        row["seconds"] += secs
+    # Also compute monthly totals for each employee
+    month_start, month_end, _ = _range_window("month")
+    month_sess = await db.timer_sessions.find({
+        "$or": [
+            {"started_at": {"$gte": month_start.isoformat()}},
+            {"ended_at": None},
+        ]
+    }, {"_id": 0}).to_list(200000)
+    monthly = {}
+    for s in month_sess:
+        info = cost_map.get(s.get("user_id"))
+        if not info:
+            continue
+        cost, secs = _session_cost_and_seconds(s, info["hourly"], month_start, month_end)
+        if secs <= 0:
+            continue
+        row = monthly.setdefault(s["user_id"], {"cost": 0.0, "seconds": 0})
+        row["cost"] += cost
+        row["seconds"] += secs
+    for uid, v in sorted(emp_agg.items(), key=lambda kv: kv[1]["cost"], reverse=True):
+        u = users.get(uid, {})
+        m = monthly.get(uid, {"cost": 0.0, "seconds": 0})
+        ws3.append([
+            u.get("first_name", ""), u.get("designation", ""),
+            round(v["seconds"] / 3600.0, 2), round(v["cost"], 2),
+            round(m["seconds"] / 3600.0, 2), round(m["cost"], 2),
+        ])
+    _autosize(ws3)
+
     return _wb_response(wb, "raybotix-costs.xlsx")
 
 
