@@ -455,10 +455,10 @@ backend:
             Phase 4 backend implementation is fully functional and ready for production.
 
   - task: "Phase 5 — lead priority + sort + is_due, invoice→recurring + record-payment + auto-terms, timer switch-lock + 30-min extension"
-    implemented: false
-    working: false
+    implemented: true
+    working: true
     file: "backend/routes_leads.py, backend/routes_billing.py, backend/routes_tasks.py, backend/autostop.py"
-    stuck_count: 1
+    stuck_count: 0
     priority: "high"
     needs_retesting: false
     status_history:
@@ -540,10 +540,43 @@ backend:
             - is_due field: ❌ NOT IMPLEMENTED
             
             Phase 5 is INCOMPLETE. Main agent must implement the missing sort and is_due features.
+        
+        - working: true
+          agent: "testing"
+          comment: |
+            ✅ Phase 5 RE-VERIFICATION COMPLETE. ALL TESTS PASSED (2/2 test groups).
+            
+            Main agent successfully restored the missing sort and is_due implementation in backend/routes_leads.py.
+            
+            A) SORT PARAMETER (4 tests): ✅ ALL PASSED
+               Test 1: Created three leads (L-Low, L-Urgent, L-Medium) ✅
+               Test 2: GET /api/leads?sort=priority → Correct order (Urgent at index 0, Medium at 1, Low at 2) ✅
+               Test 3: GET /api/leads?sort=follow_up → Leads with follow_up_date come before those without ✅
+               Test 4: GET /api/leads?sort=updated → Sorted by updated_at descending (most recent first) ✅
+            
+            B) IS_DUE FIELD (4 tests): ✅ ALL PASSED
+               Test 5: Created L-Past with follow_up_date="2020-01-01T09:00:00Z" ✅
+               Test 6: GET /api/leads → L-Past has is_due=true (past date, active stage) ✅
+               Test 7: PATCH L-Past to stage="Lost" → is_due=false (Lost stage excluded) ✅
+               Test 8: Created L-Future with follow_up_date="2099-01-01T00:00:00Z" → is_due=false (future date) ✅
+            
+            VERIFIED IMPLEMENTATION:
+            - routes_leads.py lines 45, 74-82: Sort parameter correctly implemented
+              * sort="priority": Sorts by priority rank (Urgent=0, High=1, Medium=2, Low=3)
+              * sort="follow_up": Sorts by follow_up_date ascending (None values last)
+              * sort="updated": Sorts by updated_at descending (default behavior)
+            
+            - routes_leads.py lines 23-37: is_due field correctly computed in _serialize()
+              * Checks if follow_up_date exists and stage not in (Onboarded, Lost)
+              * Compares follow_up_date with current UTC time
+              * Returns boolean is_due field in every lead response
+            
+            CLEANUP: All test leads deleted (L-Low, L-Urgent, L-Medium, L-Past, L-Future)
+            
+            Phase 5 backend implementation is NOW COMPLETE and fully functional.
 
 test_plan:
-  current_focus:
-    - "Phase 5 — Implement missing sort and is_due features in GET /api/leads"
+  current_focus: []
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -928,3 +961,49 @@ agent_communication:
         ✅ Cleanup (1 test) - Test data cleaned up
         
         Phase 4 backend implementation is fully functional and ready for production.
+
+    - agent: "testing"
+      message: |
+        ✅ Phase 5 SORT & IS_DUE RE-VERIFICATION COMPLETE. ALL TESTS PASSED (2/2 test groups, 8/8 individual tests).
+        
+        The main agent successfully restored the missing sort and is_due implementation in backend/routes_leads.py.
+        Both previously-failed features are now working correctly.
+        
+        DETAILED TEST RESULTS:
+        
+        A) SORT PARAMETER (4 tests): ✅ ALL PASSED
+           1. Created three leads (L-Low, L-Urgent, L-Medium) ✅
+           2. GET /api/leads?sort=priority → Correct order (Urgent at index 0, Medium at 1, Low at 2) ✅
+           3. GET /api/leads?sort=follow_up → Leads with follow_up_date come before those without ✅
+           4. GET /api/leads?sort=updated → Sorted by updated_at descending (most recent first) ✅
+        
+        B) IS_DUE FIELD (4 tests): ✅ ALL PASSED
+           5. Created L-Past with follow_up_date="2020-01-01T09:00:00Z" ✅
+           6. GET /api/leads → L-Past has is_due=true (past date, active stage) ✅
+           7. PATCH L-Past to stage="Lost" → is_due=false (Lost stage excluded) ✅
+           8. Created L-Future with follow_up_date="2099-01-01T00:00:00Z" → is_due=false (future date) ✅
+        
+        VERIFIED IMPLEMENTATION:
+        - routes_leads.py lines 45, 74-82: Sort parameter correctly implemented
+          * sort="priority": Sorts by priority rank (Urgent=0, High=1, Medium=2, Low=3)
+          * sort="follow_up": Sorts by follow_up_date ascending (None values last)
+          * sort="updated": Sorts by updated_at descending
+        
+        - routes_leads.py lines 23-37: is_due field correctly computed in _serialize()
+          * Checks if follow_up_date exists and stage not in (Onboarded, Lost)
+          * Compares follow_up_date with current UTC time
+          * Returns boolean is_due field in every lead response
+        
+        CLEANUP: All test leads deleted (L-Low, L-Urgent, L-Medium, L-Past, L-Future)
+        
+        Phase 5 backend implementation is NOW COMPLETE and fully functional. All 8 Phase 5 features working:
+        ✅ Lead priority validation
+        ✅ Lead sort parameter (priority|follow_up|updated)
+        ✅ Lead is_due field
+        ✅ Auto-terms (default_quotation_terms, default_invoice_terms)
+        ✅ Record payment (cumulative amount_paid, auto-mark paid)
+        ✅ Invoice → recurring template conversion
+        ✅ Single active timer per user (auto-pause other sessions)
+        ✅ 30-min extension expiry
+        
+        YOU MUST ASK USER BEFORE DOING FRONTEND TESTING

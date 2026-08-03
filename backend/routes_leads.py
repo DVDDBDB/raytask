@@ -21,9 +21,19 @@ async def _resolve_assignee(assignee_id: Optional[str]):
 
 
 def _serialize(lead: dict):
-    # ensure activities is a list, hide _id
+    from datetime import datetime, timezone
     lead.pop("_id", None)
     lead["activities"] = lead.get("activities", [])
+    is_due = False
+    if lead.get("follow_up_date") and lead.get("stage") not in ("Onboarded", "Lost"):
+        try:
+            fu = datetime.fromisoformat(str(lead["follow_up_date"]).replace("Z", "+00:00"))
+            if fu.tzinfo is None:
+                fu = fu.replace(tzinfo=timezone.utc)
+            is_due = fu <= datetime.now(timezone.utc)
+        except Exception:
+            is_due = False
+    lead["is_due"] = is_due
     return lead
 
 
@@ -31,13 +41,26 @@ def _serialize(lead: dict):
 async def list_leads(
     stage: str = "",
     assigned_to_id: str = "",
-    q: str = "",
+    priority: str = "",
+    sort: str = "follow_up",
     include_onboarded: bool = False,
+    include_lost: bool = True,
+    q: str = "",
     user=Depends(require_crm_access),
 ):
     query = {}
     if stage:
         query["stage"] = stage
+    else:
+        excluded = []
+        if not include_onboarded:
+            excluded.append("Onboarded")
+        if not include_lost:
+            excluded.append("Lost")
+        if excluded:
+            query["stage"] = {"$nin": excluded}
+    if priority:
+        query["priority"] = priority
     if assigned_to_id:
         query["assigned_to_id"] = assigned_to_id
     if q:
@@ -47,10 +70,15 @@ async def list_leads(
             {"email": {"$regex": q, "$options": "i"}},
             {"phone": {"$regex": q, "$options": "i"}},
         ]
-    # Hide Onboarded leads by default unless explicitly requested
-    if not include_onboarded:
-        query["stage"] = {"$ne": "Onboarded"} if "stage" not in query else query["stage"]
-    docs = await db.leads.find(query, {"_id": 0}).sort("updated_at", -1).to_list(5000)
+    docs = await db.leads.find(query, {"_id": 0}).to_list(5000)
+    priority_rank = {"Urgent": 0, "High": 1, "Medium": 2, "Low": 3}
+    if sort == "priority":
+        docs.sort(key=lambda d: (priority_rank.get(d.get("priority", "Medium"), 4),
+                                 d.get("follow_up_date") or "9999-99"))
+    elif sort == "follow_up":
+        docs.sort(key=lambda d: (d.get("follow_up_date") is None, d.get("follow_up_date") or ""))
+    else:
+        docs.sort(key=lambda d: d.get("updated_at", ""), reverse=True)
     return [_serialize(d) for d in docs]
 
 
