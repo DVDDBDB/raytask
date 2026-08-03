@@ -8,15 +8,29 @@ import { toast } from "sonner";
 
 export default function Settings() {
   const [settings, setSettings] = useState(null);
+  const [company, setCompany] = useState(null);
 
-  useEffect(() => { api.get("/settings").then((r) => setSettings(r.data)); }, []);
+  useEffect(() => {
+    api.get("/settings").then((r) => setSettings(r.data));
+    api.get("/settings/company").then((r) => setCompany(r.data));
+  }, []);
   if (!settings) return null;
 
   const set = (k, v) => setSettings({ ...settings, [k]: v });
+  const setC = (k, v) => setCompany({ ...(company || {}), [k]: v });
 
   const save = async () => {
     await api.patch("/settings", settings);
     toast.success("Settings saved");
+  };
+
+  const saveCompany = async () => {
+    try {
+      await api.put("/settings/company", company || {});
+      toast.success("Company & billing details saved");
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Failed to save company settings");
+    }
   };
 
   return (
@@ -69,6 +83,76 @@ export default function Settings() {
       </div>
 
       <Button onClick={save} className="rounded-full" data-testid="settings-save">Save changes</Button>
+
+      {company && (
+        <div className="card-flat p-6 space-y-4" data-testid="company-billing-section">
+          <div className="flex items-end justify-between flex-wrap gap-3">
+            <div>
+              <h3 className="text-lg font-semibold" style={{ fontFamily: "Outfit" }}>
+                Company & GST — for Quotation / Invoice PDF
+              </h3>
+              <div className="text-[11px] text-muted-foreground">
+                These details appear as header, GST, and bank block on every quotation & invoice PDF.
+              </div>
+            </div>
+            <Button onClick={saveCompany} className="rounded-full" data-testid="save-company-button">
+              Save company details
+            </Button>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="space-y-1.5"><Label>Company name *</Label>
+              <Input value={company.company_name || ""} onChange={(e) => setC("company_name", e.target.value)} data-testid="co-name" /></div>
+            <div className="space-y-1.5"><Label>Tagline</Label>
+              <Input value={company.tagline || ""} onChange={(e) => setC("tagline", e.target.value)} /></div>
+            <div className="space-y-1.5"><Label>GSTIN</Label>
+              <Input value={company.gst_number || ""} onChange={(e) => setC("gst_number", e.target.value)} data-testid="co-gst" /></div>
+            <div className="space-y-1.5"><Label>PAN</Label>
+              <Input value={company.pan_number || ""} onChange={(e) => setC("pan_number", e.target.value)} /></div>
+            <div className="space-y-1.5 md:col-span-2"><Label>Address</Label>
+              <Input value={company.address || ""} onChange={(e) => setC("address", e.target.value)} /></div>
+            <div className="space-y-1.5"><Label>City</Label>
+              <Input value={company.city || ""} onChange={(e) => setC("city", e.target.value)} /></div>
+            <div className="space-y-1.5"><Label>State</Label>
+              <Input value={company.state || ""} onChange={(e) => setC("state", e.target.value)} /></div>
+            <div className="space-y-1.5"><Label>Pincode</Label>
+              <Input value={company.pincode || ""} onChange={(e) => setC("pincode", e.target.value)} /></div>
+            <div className="space-y-1.5"><Label>Phone</Label>
+              <Input value={company.phone || ""} onChange={(e) => setC("phone", e.target.value)} /></div>
+            <div className="space-y-1.5"><Label>Email</Label>
+              <Input value={company.email || ""} onChange={(e) => setC("email", e.target.value)} /></div>
+            <div className="space-y-1.5"><Label>Website</Label>
+              <Input value={company.website || ""} onChange={(e) => setC("website", e.target.value)} /></div>
+            <div className="space-y-1.5 md:col-span-2"><Label>Logo URL</Label>
+              <Input value={company.logo_url || ""} onChange={(e) => setC("logo_url", e.target.value)} placeholder="https://…/raybotix-logo.png" /></div>
+          </div>
+
+          <div className="border-t border-border pt-4">
+            <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-3">Bank details (shown on invoices)</div>
+            <div className="grid md:grid-cols-2 gap-4">
+              <div className="space-y-1.5"><Label>Account name</Label>
+                <Input value={company.bank_account_name || ""} onChange={(e) => setC("bank_account_name", e.target.value)} /></div>
+              <div className="space-y-1.5"><Label>Account number</Label>
+                <Input value={company.bank_account_number || ""} onChange={(e) => setC("bank_account_number", e.target.value)} data-testid="co-bank-account" /></div>
+              <div className="space-y-1.5"><Label>IFSC</Label>
+                <Input value={company.bank_ifsc || ""} onChange={(e) => setC("bank_ifsc", e.target.value)} /></div>
+              <div className="space-y-1.5"><Label>Bank name</Label>
+                <Input value={company.bank_name || ""} onChange={(e) => setC("bank_name", e.target.value)} /></div>
+              <div className="space-y-1.5"><Label>Branch</Label>
+                <Input value={company.bank_branch || ""} onChange={(e) => setC("bank_branch", e.target.value)} /></div>
+              <div className="space-y-1.5"><Label>UPI ID</Label>
+                <Input value={company.bank_upi || ""} onChange={(e) => setC("bank_upi", e.target.value)} /></div>
+            </div>
+          </div>
+
+          <div className="border-t border-border pt-4 grid md:grid-cols-2 gap-4">
+            <div className="space-y-1.5"><Label>Quotation footer</Label>
+              <Input value={company.quotation_footer || ""} onChange={(e) => setC("quotation_footer", e.target.value)} /></div>
+            <div className="space-y-1.5"><Label>Invoice footer</Label>
+              <Input value={company.invoice_footer || ""} onChange={(e) => setC("invoice_footer", e.target.value)} /></div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -123,6 +123,94 @@ export default function Analytics() {
           </div>
         </div>
       )}
+
+      <LeadAnalyticsSection />
+    </div>
+  );
+}
+
+function LeadAnalyticsSection() {
+  const { user } = useAuth();
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    api.get("/analytics/leads").then((r) => setData(r.data)).catch(() => setData({ owners: [], totals: {} }));
+  }, []);
+  if (!data) return null;
+  const hasAccess = user?.role === "super_admin" || user?.role === "admin" || user?.crm_access;
+  if (!hasAccess) return null;
+  const { owners = [], totals = {} } = data;
+  return (
+    <div className="space-y-4" data-testid="lead-analytics-section">
+      <div>
+        <div className="text-overline">CRM</div>
+        <h2 className="text-2xl font-semibold" style={{ fontFamily: "Outfit" }}>Lead Analytics</h2>
+      </div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <Tile label="Contacted" value={totals.total_contacted || 0} />
+        <Tile label="Converted" value={totals.total_converted || 0} />
+        <Tile label="Pipeline value" value={formatINR(totals.pipeline_value || 0)} />
+        <Tile label="Sales generated" value={formatINR(totals.sales_generated || 0)} highlight />
+      </div>
+      <div className="card-flat p-6">
+        <h3 className="text-lg font-semibold mb-3" style={{ fontFamily: "Outfit" }}>Per owner</h3>
+        <div className="h-64">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={owners.map((o) => ({ name: o.owner_name, Contacted: o.contacted, Converted: o.converted, Lost: o.lost }))}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+              <XAxis dataKey="name" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} />
+              <YAxis tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} />
+              <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }} />
+              <Bar dataKey="Contacted" fill="hsl(217 91% 60%)" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="Converted" fill="hsl(158 64% 42%)" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="Lost" fill="hsl(0 74% 55%)" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        <div className="overflow-x-auto mt-4">
+          <table className="w-full text-sm">
+            <thead className="text-[11px] uppercase text-muted-foreground">
+              <tr>
+                <th className="text-left py-2 pr-2">Owner</th>
+                <th className="text-right py-2 px-2">Contacted</th>
+                <th className="text-right py-2 px-2">Converted</th>
+                <th className="text-right py-2 px-2">Conv. %</th>
+                <th className="text-right py-2 px-2">Pipeline ₹</th>
+                <th className="text-right py-2 pl-2">Sales ₹</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {owners.map((o) => (
+                <tr key={o.owner_id}>
+                  <td className="py-2 pr-2">
+                    <div className="font-semibold">{o.owner_name}</div>
+                    <div className="text-[11px] text-muted-foreground">{o.designation}</div>
+                  </td>
+                  <td className="py-2 px-2 text-right tabular-nums">{o.contacted}</td>
+                  <td className="py-2 px-2 text-right tabular-nums">{o.converted}</td>
+                  <td className="py-2 px-2 text-right tabular-nums">{o.conversion_rate}%</td>
+                  <td className="py-2 px-2 text-right tabular-nums">{formatINR(o.pipeline_value)}</td>
+                  <td className="py-2 pl-2 text-right tabular-nums text-primary font-semibold">{formatINR(o.onboarded_value)}</td>
+                </tr>
+              ))}
+              {owners.length === 0 && (
+                <tr><td colSpan={6} className="py-6 text-center text-muted-foreground">No lead activity yet.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Tile({ label, value, highlight }) {
+  return (
+    <div className={`card-flat p-4 ${highlight ? "ring-1 ring-primary/20" : ""}`}>
+      <div className="text-overline">{label}</div>
+      <div className={`text-2xl font-semibold tabular-nums mt-1 ${highlight ? "text-primary" : ""}`}
+           style={{ fontFamily: "Outfit" }}>
+        {value}
+      </div>
     </div>
   );
 }

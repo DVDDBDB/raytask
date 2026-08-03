@@ -10,10 +10,11 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { Plus, Trash2, Save, Send, IndianRupee, CheckCircle2, XCircle, Building2 } from "lucide-react";
+import { Plus, Trash2, Save, Send, IndianRupee, CheckCircle2, XCircle, Building2, Download } from "lucide-react";
 import { formatINR } from "@/lib/format";
 import { toast } from "sonner";
 import api from "@/lib/api";
+import { downloadFromPath } from "@/lib/uploads";
 
 const STATUS_CHIP = {
   draft: "bg-slate-500/10 text-slate-600 dark:text-slate-300",
@@ -310,6 +311,12 @@ export default function BillingDialog({
         </div>
 
         <DialogFooter className="flex-wrap gap-2">
+          {isEdit && (
+            <Button variant="outline" className="gap-1.5" data-testid="bill-pdf-button"
+                    onClick={() => downloadFromPath(`${base}/${initial.id}/pdf`, `${form.number || kind}.pdf`)}>
+              <Download className="w-4 h-4" /> Download PDF
+            </Button>
+          )}
           {isEdit && form.status === "draft" && (
             <Button variant="outline" onClick={send} className="gap-1.5 mr-auto" data-testid="bill-send-button">
               <Send className="w-4 h-4" /> {isInvoice ? "Send invoice" : "Send quotation"}

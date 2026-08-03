@@ -122,6 +122,55 @@ export default function Dashboard() {
           ))}
         </div>
       </div>
+
+      <FollowUpWidget />
+    </div>
+  );
+}
+
+function FollowUpWidget() {
+  const { user } = useAuth();
+  const [items, setItems] = React.useState([]);
+  const [loaded, setLoaded] = React.useState(false);
+  React.useEffect(() => {
+    const canSee = user?.role === "super_admin" || user?.role === "admin" || user?.crm_access;
+    if (!canSee) { setLoaded(true); return; }
+    api.get("/leads/follow-ups/upcoming", { params: { days: 14 } })
+      .then((r) => setItems(r.data || []))
+      .catch(() => {})
+      .finally(() => setLoaded(true));
+  }, [user]);
+  const canSee = user?.role === "super_admin" || user?.role === "admin" || user?.crm_access;
+  if (!canSee || !loaded) return null;
+  return (
+    <div className="card-flat p-6" data-testid="dashboard-followups">
+      <div className="flex items-end justify-between mb-3">
+        <div>
+          <div className="text-overline">CRM</div>
+          <h3 className="text-xl font-semibold" style={{ fontFamily: "Outfit" }}>Pending follow-ups (next 14 days)</h3>
+        </div>
+        <Link to="/crm" className="text-xs text-primary hover:underline">Open CRM →</Link>
+      </div>
+      {items.length === 0 ? (
+        <div className="text-sm text-muted-foreground">You&apos;re all caught up — no follow-ups scheduled.</div>
+      ) : (
+        <div className="divide-y divide-border">
+          {items.map((l) => (
+            <Link key={l.id} to="/crm" className="flex items-center justify-between py-2.5 hover:bg-secondary/30 -mx-2 px-2 rounded"
+                  data-testid={`followup-${l.id}`}>
+              <div className="min-w-0">
+                <div className="font-semibold truncate">{l.name} {l.company && <span className="text-muted-foreground font-normal">· {l.company}</span>}</div>
+                <div className="text-[11px] text-muted-foreground mt-0.5">
+                  {l.stage} · {l.next_step || "No next step set"}
+                </div>
+              </div>
+              <div className="text-[11px] text-muted-foreground shrink-0 ml-3">
+                {formatDate(l.follow_up_date)}
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

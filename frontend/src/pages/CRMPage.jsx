@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { formatINR } from "@/lib/format";
 import {
   Plus, Search, Phone, Mail, Building2, CalendarClock, User as UserIcon,
-  Rocket, Trash2, Save, Filter, X, StickyNote, FileText,
+  Rocket, Trash2, Save, Filter, X, StickyNote, FileText, Flame, Snowflake, Sun,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,6 +30,21 @@ const STAGE_COLORS = {
 };
 
 const SOURCES = ["Website", "Referral", "Cold Call", "Ad", "Instagram", "LinkedIn", "Other"];
+const TEMPERATURES = [
+  { key: "hot", label: "Hot", icon: Flame, cls: "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/30" },
+  { key: "warm", label: "Warm", icon: Sun, cls: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30" },
+  { key: "cold", label: "Cold", icon: Snowflake, cls: "bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/30" },
+];
+
+function TempChip({ value }) {
+  const t = TEMPERATURES.find((x) => x.key === value) || TEMPERATURES[1];
+  const Icon = t.icon;
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${t.cls}`}>
+      <Icon className="w-3 h-3" /> {t.label}
+    </span>
+  );
+}
 
 const emptyLead = {
   name: "",
@@ -38,6 +53,7 @@ const emptyLead = {
   phone: "",
   source: "Website",
   stage: "New",
+  temperature: "warm",
   next_step: "",
   follow_up_date: "",
   assigned_to_id: "",
@@ -61,11 +77,14 @@ function LeadCard({ lead, onOpen }) {
             </div>
           )}
         </div>
-        {lead.value_estimate > 0 && (
-          <span className="text-[11px] font-semibold text-primary tabular-nums shrink-0">
-            {formatINR(lead.value_estimate)}
-          </span>
-        )}
+        <div className="flex flex-col items-end gap-1 shrink-0">
+          <TempChip value={lead.temperature || "warm"} />
+          {lead.value_estimate > 0 && (
+            <span className="text-[11px] font-semibold text-primary tabular-nums">
+              {formatINR(lead.value_estimate)}
+            </span>
+          )}
+        </div>
       </div>
       {lead.next_step && (
         <div className="text-[11px] text-muted-foreground mt-2 line-clamp-2">
@@ -197,6 +216,27 @@ function LeadDialog({ open, onOpenChange, lead, teamMembers, stages, onSaved, on
               </SelectContent>
             </Select>
           </div>
+          <div className="space-y-1.5">
+            <Label>Temperature</Label>
+            <div className="flex gap-2" data-testid="lead-temperature-group">
+              {TEMPERATURES.map((t) => {
+                const Icon = t.icon;
+                const active = form.temperature === t.key;
+                return (
+                  <button
+                    key={t.key} type="button"
+                    onClick={() => setForm({ ...form, temperature: t.key })}
+                    data-testid={`temp-${t.key}`}
+                    className={`flex-1 inline-flex items-center justify-center gap-1 rounded-md border px-2 py-2 text-xs font-semibold transition ${
+                      active ? t.cls + " ring-2 ring-primary/40" : "border-border text-muted-foreground hover:bg-secondary/40"
+                    }`}
+                  >
+                    <Icon className="w-3.5 h-3.5" /> {t.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
           <div className="space-y-1.5"><Label>Assign to (sales owner)</Label>
             <Select
               value={form.assigned_to_id || "none"}
@@ -326,13 +366,15 @@ export default function CRMPage() {
   const [assigneeFilter, setAssigneeFilter] = useState("all");
   const [dialogLead, setDialogLead] = useState(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [tempFilter, setTempFilter] = useState("all");
 
   const load = async () => {
     setLoading(true);
     try {
-      const params = {};
+      const params = { include_onboarded: false };
       if (search) params.q = search;
       if (assigneeFilter && assigneeFilter !== "all") params.assigned_to_id = assigneeFilter;
+      if (tempFilter && tempFilter !== "all") params.temperature = tempFilter;
       const [ls, sts, tm] = await Promise.all([
         api.get("/leads", { params }),
         api.get("/leads/stages"),
@@ -346,7 +388,7 @@ export default function CRMPage() {
     } finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [assigneeFilter]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [assigneeFilter, tempFilter]);
 
   // Debounced search
   useEffect(() => {
@@ -355,14 +397,19 @@ export default function CRMPage() {
     // eslint-disable-next-line
   }, [search]);
 
+  const visibleStages = useMemo(
+    () => stages.filter((s) => s !== "Onboarded"),
+    [stages]
+  );
+
   const byStage = useMemo(() => {
     const out = {};
-    stages.forEach((s) => (out[s] = []));
+    visibleStages.forEach((s) => (out[s] = []));
     leads.forEach((l) => {
       if (out[l.stage]) out[l.stage].push(l);
     });
     return out;
-  }, [stages, leads]);
+  }, [visibleStages, leads]);
 
   const totals = useMemo(() => {
     const active = leads.filter((l) => l.stage !== "Lost" && l.stage !== "Onboarded");
@@ -451,8 +498,17 @@ export default function CRMPage() {
               ))}
             </SelectContent>
           </Select>
-          {(search || assigneeFilter !== "all") && (
-            <Button variant="ghost" size="sm" onClick={() => { setSearch(""); setAssigneeFilter("all"); }}
+          <Select value={tempFilter} onValueChange={setTempFilter}>
+            <SelectTrigger className="w-36" data-testid="lead-temp-filter"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Any temp</SelectItem>
+              {TEMPERATURES.map((t) => (
+                <SelectItem key={t.key} value={t.key}>{t.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {(search || assigneeFilter !== "all" || tempFilter !== "all") && (
+            <Button variant="ghost" size="sm" onClick={() => { setSearch(""); setAssigneeFilter("all"); setTempFilter("all"); }}
                     className="gap-1"><X className="w-3.5 h-3.5" /> Clear</Button>
           )}
         </div>

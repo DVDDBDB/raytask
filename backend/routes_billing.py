@@ -126,6 +126,44 @@ async def _notify_team_on_send(kind_label: str, doc: dict, actor: dict):
         )
 
 
+async def _user_can_view(doc: dict, user: dict) -> bool:
+    """Admins see everything; sales users see only 'their' quotations/invoices."""
+    if user.get("role") in ("super_admin", "admin"):
+        return True
+    if doc.get("created_by_id") == user["id"]:
+        return True
+    if doc.get("lead_id"):
+        lead = await db.leads.find_one({"id": doc["lead_id"]}, {"_id": 0, "assigned_to_id": 1, "created_by_id": 1})
+        if lead and (lead.get("assigned_to_id") == user["id"] or lead.get("created_by_id") == user["id"]):
+            return True
+    if doc.get("project_id"):
+        proj = await db.projects.find_one({"id": doc["project_id"]}, {"_id": 0, "member_ids": 1})
+        if proj and user["id"] in (proj.get("member_ids") or []):
+            return True
+    return False
+
+
+async def _visibility_query(user: dict) -> dict:
+    """Return a mongo query fragment that limits visibility for non-admin users."""
+    if user.get("role") in ("super_admin", "admin"):
+        return {}
+    uid = user["id"]
+    # Owned leads (assigned to or created by me)
+    lead_ids = [d["id"] for d in await db.leads.find(
+        {"$or": [{"assigned_to_id": uid}, {"created_by_id": uid}]},
+        {"_id": 0, "id": 1},
+    ).to_list(5000)]
+    project_ids = [d["id"] for d in await db.projects.find(
+        {"member_ids": uid}, {"_id": 0, "id": 1},
+    ).to_list(5000)]
+    ors = [{"created_by_id": uid}]
+    if lead_ids:
+        ors.append({"lead_id": {"$in": lead_ids}})
+    if project_ids:
+        ors.append({"project_id": {"$in": project_ids}})
+    return {"$or": ors}
+
+
 # ================================================================
 # Quotations
 # ================================================================
@@ -145,6 +183,9 @@ async def list_quotations(
         q["lead_id"] = lead_id
     if project_id:
         q["project_id"] = project_id
+    vis = await _visibility_query(user)
+    if vis:
+        q = {"$and": [q, vis]} if q else vis
     docs = await db.quotations.find(q, {"_id": 0}).sort("created_at", -1).to_list(2000)
     return docs
 
@@ -187,6 +228,8 @@ async def get_quotation(qid: str, user=Depends(require_crm_access)):
     doc = await db.quotations.find_one({"id": qid}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Quotation not found")
+    if not await _user_can_view(doc, user):
+        raise HTTPException(status_code=403, detail="Not allowed to view this quotation")
     return doc
 
 
@@ -195,6 +238,8 @@ async def update_quotation(qid: str, payload: QuotationUpdate, user=Depends(requ
     doc = await db.quotations.find_one({"id": qid})
     if not doc:
         raise HTTPException(status_code=404, detail="Quotation not found")
+    if not await _user_can_view(doc, user):
+        raise HTTPException(status_code=403, detail="Not allowed to edit this quotation")
     update = payload.model_dump(exclude_none=True)
     if "status" in update and update["status"] not in QUOTATION_STATUSES:
         raise HTTPException(status_code=400, detail=f"Invalid status. Allowed: {QUOTATION_STATUSES}")
@@ -280,6 +325,9 @@ async def list_invoices(
         q["lead_id"] = lead_id
     if project_id:
         q["project_id"] = project_id
+    vis = await _visibility_query(user)
+    if vis:
+        q = {"$and": [q, vis]} if q else vis
     docs = await db.invoices.find(q, {"_id": 0}).sort("created_at", -1).to_list(2000)
     # Mark overdue on-the-fly if due_date has passed and status still 'sent'
     now = datetime.now(timezone.utc).isoformat()
@@ -292,6 +340,16 @@ async def list_invoices(
 @invoices.get("/statuses")
 async def invoice_statuses(user=Depends(require_crm_access)):
     return INVOICE_STATUSES
+
+
+@invoices.get("/{iid}")
+async def get_invoice(iid: str, user=Depends(require_crm_access)):
+    doc = await db.invoices.find_one({"id": iid}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    if not await _user_can_view(doc, user):
+        raise HTTPException(status_code=403, detail="Not allowed to view this invoice")
+    return doc
 
 
 @invoices.post("")
@@ -376,19 +434,13 @@ async def invoice_from_quotation(qid: str, user=Depends(require_crm_access)):
     return doc
 
 
-@invoices.get("/{iid}")
-async def get_invoice(iid: str, user=Depends(require_crm_access)):
-    doc = await db.invoices.find_one({"id": iid}, {"_id": 0})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Invoice not found")
-    return doc
-
-
 @invoices.patch("/{iid}")
 async def update_invoice(iid: str, payload: InvoiceUpdate, user=Depends(require_crm_access)):
     doc = await db.invoices.find_one({"id": iid})
     if not doc:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    if not await _user_can_view(doc, user):
+        raise HTTPException(status_code=403, detail="Not allowed to edit this invoice")
     update = payload.model_dump(exclude_none=True)
     if "status" in update and update["status"] not in INVOICE_STATUSES:
         raise HTTPException(status_code=400, detail=f"Invalid status. Allowed: {INVOICE_STATUSES}")

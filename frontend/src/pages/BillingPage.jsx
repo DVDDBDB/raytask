@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Plus, FileText, Receipt, ArrowRightLeft, Search } from "lucide-react";
+import { Plus, FileText, Receipt, ArrowRightLeft, Search, Repeat, Play, Pause, X } from "lucide-react";
 import { toast } from "sonner";
 import { useSearchParams, useNavigate } from "react-router-dom";
 
@@ -58,6 +58,7 @@ export default function BillingPage() {
   const [tab, setTab] = useState("quotations");
   const [quotations, setQuotations] = useState([]);
   const [invoices, setInvoices] = useState([]);
+  const [recurring, setRecurring] = useState([]);
   const [leads, setLeads] = useState([]);
   const [projects, setProjects] = useState([]);
   const [statusFilter, setStatusFilter] = useState("all");
@@ -65,17 +66,20 @@ export default function BillingPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogInitial, setDialogInitial] = useState(null);
   const [dialogKind, setDialogKind] = useState("quotation");
+  const [recurringDialog, setRecurringDialog] = useState({ open: false, initial: null });
 
   const load = async () => {
     try {
-      const [qs, invs, ls, ps] = await Promise.all([
+      const [qs, invs, rec, ls, ps] = await Promise.all([
         api.get("/quotations"),
         api.get("/invoices"),
+        api.get("/recurring-invoices").catch(() => ({ data: [] })),
         api.get("/leads").catch(() => ({ data: [] })),
         api.get("/projects").catch(() => ({ data: [] })),
       ]);
       setQuotations(qs.data || []);
       setInvoices(invs.data || []);
+      setRecurring(rec.data || []);
       setLeads(ls.data || []);
       setProjects(ps.data || []);
     } catch (e) { /* silent */ }
@@ -109,6 +113,10 @@ export default function BillingPage() {
   }, [leads]);
 
   const openNew = () => {
+    if (tab === "recurring") {
+      setRecurringDialog({ open: true, initial: null });
+      return;
+    }
     setDialogKind(tab === "invoices" ? "invoice" : "quotation");
     setDialogInitial(null);
     setDialogOpen(true);
@@ -185,12 +193,12 @@ export default function BillingPage() {
           </h1>
         </div>
         <Button onClick={openNew} className="gap-1.5 rounded-full" data-testid="new-bill-button">
-          <Plus className="w-4 h-4" /> New {tab === "invoices" ? "invoice" : "quotation"}
+          <Plus className="w-4 h-4" /> New {tab === "invoices" ? "invoice" : tab === "recurring" ? "recurring template" : "quotation"}
         </Button>
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-2">
+      <div className="flex gap-2 flex-wrap">
         <button
           onClick={() => { setTab("quotations"); setStatusFilter("all"); }}
           data-testid="tab-quotations"
@@ -208,6 +216,15 @@ export default function BillingPage() {
           }`}
         >
           <Receipt className="w-4 h-4" /> Invoices · {invoices.length}
+        </button>
+        <button
+          onClick={() => { setTab("recurring"); setStatusFilter("all"); }}
+          data-testid="tab-recurring"
+          className={`px-4 py-2 rounded-full text-sm font-medium inline-flex items-center gap-2 transition ${
+            tab === "recurring" ? "bg-primary text-primary-foreground shadow" : "bg-secondary hover:bg-secondary/80"
+          }`}
+        >
+          <Repeat className="w-4 h-4" /> Recurring · {recurring.length}
         </button>
       </div>
 
@@ -239,6 +256,7 @@ export default function BillingPage() {
       </div>
 
       {/* Table */}
+      {tab !== "recurring" && (
       <div className="card-flat p-0 overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-secondary/40 text-[11px] uppercase text-muted-foreground">
@@ -288,6 +306,27 @@ export default function BillingPage() {
           </tbody>
         </table>
       </div>
+      )}
+
+      {tab === "recurring" && (
+        <RecurringList
+          items={recurring}
+          onEdit={(r) => setRecurringDialog({ open: true, initial: r })}
+          onRun={async (r) => {
+            try {
+              const res = await api.post(`/recurring-invoices/${r.id}/run-now`);
+              toast.success(`Draft invoice ${res.data.invoice.number} created`);
+              await load();
+            } catch (e) { toast.error(e?.response?.data?.detail || "Failed"); }
+          }}
+          onToggle={async (r) => {
+            try {
+              await api.patch(`/recurring-invoices/${r.id}`, { active: !r.active });
+              await load();
+            } catch (e) { toast.error("Failed"); }
+          }}
+        />
+      )}
 
       <BillingDialog
         open={dialogOpen}
@@ -298,6 +337,15 @@ export default function BillingPage() {
         projects={projects}
         onSaved={onSaved}
         onDeleted={onDeleted}
+      />
+
+      <RecurringDialog
+        open={recurringDialog.open}
+        initial={recurringDialog.initial}
+        leads={leads}
+        projects={projects}
+        onClose={() => setRecurringDialog({ open: false, initial: null })}
+        onSaved={async () => { await load(); setRecurringDialog({ open: false, initial: null }); }}
       />
     </div>
   );
@@ -314,3 +362,206 @@ function Tile({ label, value, highlight }) {
     </div>
   );
 }
+
+
+
+function RecurringList({ items, onEdit, onRun, onToggle }) {
+  if (!items || items.length === 0) {
+    return (
+      <div className="card-flat p-10 text-center text-muted-foreground text-sm">
+        <Repeat className="w-6 h-6 mx-auto mb-2 opacity-60" />
+        No recurring templates yet. Create one to auto-generate a Draft invoice every month.
+      </div>
+    );
+  }
+  return (
+    <div className="card-flat p-0 overflow-hidden">
+      <table className="w-full text-sm">
+        <thead className="bg-secondary/40 text-[11px] uppercase text-muted-foreground">
+          <tr>
+            <th className="text-left px-4 py-2.5">Client</th>
+            <th className="text-left px-4 py-2.5 w-24">Day</th>
+            <th className="text-left px-4 py-2.5 w-40">Next run</th>
+            <th className="text-left px-4 py-2.5 w-40">Last run</th>
+            <th className="text-right px-4 py-2.5 w-28">Amount ₹</th>
+            <th className="text-center px-4 py-2.5 w-20">Active</th>
+            <th className="px-4 py-2.5 w-44" />
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {items.map((r) => {
+            const total = (r.items || []).reduce((s, it) => {
+              const lt = parseFloat(it.qty || 0) * parseFloat(it.rate || 0);
+              return s + lt + lt * parseFloat(it.gst_pct || 0) / 100;
+            }, 0);
+            return (
+              <tr key={r.id} className="hover:bg-secondary/30 cursor-pointer"
+                  onClick={() => onEdit(r)}
+                  data-testid={`recurring-row-${r.id}`}>
+                <td className="px-4 py-3">
+                  <div className="font-semibold">{r.client_company || r.client_name}</div>
+                  {r.client_company && r.client_name && (
+                    <div className="text-[11px] text-muted-foreground">{r.client_name}</div>
+                  )}
+                </td>
+                <td className="px-4 py-3 font-mono">{r.day_of_month || 1}</td>
+                <td className="px-4 py-3 text-muted-foreground">{(r.next_run_date || "").slice(0, 10) || "—"}</td>
+                <td className="px-4 py-3 text-muted-foreground">{(r.last_run_at || "").slice(0, 10) || "Never"}</td>
+                <td className="px-4 py-3 text-right tabular-nums font-semibold text-primary">
+                  {formatINR(total)}
+                </td>
+                <td className="px-4 py-3 text-center">
+                  <span className={`inline-flex text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full ${r.active ? "bg-emerald-500/10 text-emerald-600" : "bg-slate-500/10 text-slate-500"}`}>
+                    {r.active ? "Active" : "Paused"}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <div className="inline-flex gap-1">
+                    <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); onToggle(r); }}
+                            data-testid={`toggle-${r.id}`}
+                            className={r.active ? "text-amber-600" : "text-emerald-600"}>
+                      {r.active ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); onRun(r); }}
+                            data-testid={`run-${r.id}`}>
+                      Run now
+                    </Button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function RecurringDialog({ open, initial, leads, projects, onClose, onSaved }) {
+  const emptyForm = {
+    client_name: "", client_company: "", client_email: "", client_phone: "", client_address: "",
+    items: [{ description: "", qty: 1, rate: 0, gst_pct: 18 }],
+    notes: "", terms: "", day_of_month: 1, active: true, lead_id: null, project_id: null,
+  };
+  const [form, setForm] = React.useState(initial || emptyForm);
+  React.useEffect(() => { setForm(initial || emptyForm); /* eslint-disable-next-line */ }, [initial, open]);
+  if (!open) return null;
+
+  const total = (form.items || []).reduce((s, it) => {
+    const lt = parseFloat(it.qty || 0) * parseFloat(it.rate || 0);
+    return s + lt + lt * parseFloat(it.gst_pct || 0) / 100;
+  }, 0);
+  const updateItem = (i, patch) => {
+    const items = [...(form.items || [])];
+    items[i] = { ...items[i], ...patch };
+    setForm({ ...form, items });
+  };
+  const save = async () => {
+    if (!form.client_name && !form.client_company) return toast.error("Add a client name");
+    if (!form.items?.length) return toast.error("Add at least one line item");
+    try {
+      if (initial?.id) await api.patch(`/recurring-invoices/${initial.id}`, form);
+      else await api.post("/recurring-invoices", form);
+      toast.success(initial?.id ? "Saved" : "Recurring template created");
+      onSaved();
+    } catch (e) { toast.error(e?.response?.data?.detail || "Failed"); }
+  };
+  const del = async () => {
+    if (!initial?.id) return;
+    if (!window.confirm("Delete this template?")) return;
+    try { await api.delete(`/recurring-invoices/${initial.id}`); toast.success("Deleted"); onSaved(); }
+    catch (e) { toast.error(e?.response?.data?.detail || "Failed"); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"
+         onClick={onClose}>
+      <div className="bg-card rounded-lg shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
+           onClick={(e) => e.stopPropagation()}>
+        <div className="px-6 py-4 border-b border-border">
+          <div className="text-lg font-semibold flex items-center gap-2" style={{ fontFamily: "Outfit" }}>
+            <Repeat className="w-5 h-5 text-primary" />
+            {initial?.id ? "Edit recurring template" : "New recurring template"}
+          </div>
+          <div className="text-[11px] text-muted-foreground mt-0.5">
+            A Draft invoice will be auto-created every month on the chosen day.
+          </div>
+        </div>
+        <div className="px-6 py-4 overflow-y-auto flex-1 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1"><label className="text-[11px] font-semibold">Client name</label>
+              <input className="w-full h-9 rounded-md border border-border bg-background px-2 text-sm"
+                     value={form.client_name} onChange={(e) => setForm({ ...form, client_name: e.target.value })} /></div>
+            <div className="space-y-1"><label className="text-[11px] font-semibold">Company</label>
+              <input className="w-full h-9 rounded-md border border-border bg-background px-2 text-sm"
+                     value={form.client_company} onChange={(e) => setForm({ ...form, client_company: e.target.value })} /></div>
+            <div className="space-y-1"><label className="text-[11px] font-semibold">Client email</label>
+              <input className="w-full h-9 rounded-md border border-border bg-background px-2 text-sm"
+                     value={form.client_email} onChange={(e) => setForm({ ...form, client_email: e.target.value })} /></div>
+            <div className="space-y-1"><label className="text-[11px] font-semibold">Day of month (1–28)</label>
+              <input type="number" min="1" max="28"
+                     className="w-full h-9 rounded-md border border-border bg-background px-2 text-sm"
+                     value={form.day_of_month || 1}
+                     onChange={(e) => setForm({ ...form, day_of_month: parseInt(e.target.value || "1", 10) })} /></div>
+          </div>
+          <div>
+            <div className="text-[11px] font-semibold mb-1">Line items</div>
+            <div className="border border-border rounded-md overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-secondary/40 text-[10px] uppercase text-muted-foreground">
+                  <tr>
+                    <th className="text-left px-2 py-1.5">Description</th>
+                    <th className="text-right px-2 py-1.5 w-16">Qty</th>
+                    <th className="text-right px-2 py-1.5 w-24">Rate ₹</th>
+                    <th className="text-right px-2 py-1.5 w-16">GST %</th>
+                    <th className="w-6" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {(form.items || []).map((it, idx) => (
+                    <tr key={idx} className="border-t border-border">
+                      <td className="px-1.5 py-1"><input className="w-full h-8 rounded border border-border bg-background px-2 text-sm"
+                        value={it.description} onChange={(e) => updateItem(idx, { description: e.target.value })} /></td>
+                      <td className="px-1.5 py-1"><input type="number" className="w-full h-8 rounded border border-border bg-background px-2 text-sm text-right"
+                        value={it.qty} onChange={(e) => updateItem(idx, { qty: e.target.value })} /></td>
+                      <td className="px-1.5 py-1"><input type="number" className="w-full h-8 rounded border border-border bg-background px-2 text-sm text-right"
+                        value={it.rate} onChange={(e) => updateItem(idx, { rate: e.target.value })} /></td>
+                      <td className="px-1.5 py-1"><input type="number" className="w-full h-8 rounded border border-border bg-background px-2 text-sm text-right"
+                        value={it.gst_pct} onChange={(e) => updateItem(idx, { gst_pct: e.target.value })} /></td>
+                      <td className="px-1"><Button size="icon" variant="ghost" className="h-7 w-7 text-red-600"
+                        onClick={() => setForm({ ...form, items: form.items.filter((_, i) => i !== idx) })}>
+                        <X className="w-3.5 h-3.5" /></Button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex items-center justify-between mt-2">
+              <Button size="sm" variant="outline"
+                      onClick={() => setForm({ ...form, items: [...(form.items || []), { description: "", qty: 1, rate: 0, gst_pct: 18 }] })}>
+                <Plus className="w-3.5 h-3.5 mr-1" /> Add row
+              </Button>
+              <div className="text-sm text-muted-foreground">
+                Estimated monthly total: <b className="text-primary tabular-nums">{formatINR(total)}</b>
+              </div>
+            </div>
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" className="accent-primary" checked={!!form.active}
+                   onChange={(e) => setForm({ ...form, active: e.target.checked })} />
+            Active (auto-generate every month)
+          </label>
+        </div>
+        <div className="px-6 py-3 border-t border-border flex justify-end gap-2">
+          {initial?.id && (
+            <Button variant="outline" className="text-red-600 mr-auto" onClick={del}>Delete</Button>
+          )}
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={save} data-testid="recurring-save-button">Save</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Import X icon for RecurringDialog (already imported top-level via lucide-react)

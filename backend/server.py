@@ -23,6 +23,7 @@ from routes_exports import router as exports_router  # noqa: E402
 from routes_ws import router as ws_router  # noqa: E402
 from routes_leads import router as leads_router  # noqa: E402
 from routes_billing import router as billing_router  # noqa: E402
+from routes_billing_extras import router as billing_extras_router, start_recurring_scheduler  # noqa: E402
 from seed import seed  # noqa: E402
 import recurring  # noqa: E402
 import autostop  # noqa: E402
@@ -52,6 +53,7 @@ api_router.include_router(exports_router)
 api_router.include_router(ws_router)
 api_router.include_router(leads_router)
 api_router.include_router(billing_router)
+api_router.include_router(billing_extras_router)
 
 app.include_router(api_router)
 
@@ -86,6 +88,12 @@ async def on_startup():
         logger.info("Auto-stop (18:00 IST) scheduler started")
     except Exception as e:
         logger.exception("Auto-stop scheduler failed to start: %s", e)
+    # Kick off recurring-invoice scheduler
+    try:
+        start_recurring_scheduler(asyncio.get_event_loop())
+        logger.info("Recurring-invoice scheduler started")
+    except Exception as e:
+        logger.exception("Recurring-invoice scheduler failed to start: %s", e)
 
 
 @app.on_event("shutdown")

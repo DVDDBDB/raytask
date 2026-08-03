@@ -235,6 +235,7 @@ class LeadCreate(BaseModel):
     phone: str = ""
     source: str = "Website"          # Website, Referral, Cold Call, Ad, Other
     stage: str = "New"
+    temperature: str = "warm"        # hot | warm | cold
     next_step: str = ""
     follow_up_date: Optional[str] = None
     assigned_to_id: Optional[str] = None
@@ -250,6 +251,7 @@ class LeadUpdate(BaseModel):
     phone: Optional[str] = None
     source: Optional[str] = None
     stage: Optional[str] = None
+    temperature: Optional[str] = None
     next_step: Optional[str] = None
     follow_up_date: Optional[str] = None
     assigned_to_id: Optional[str] = None
@@ -351,3 +353,64 @@ class InvoiceUpdate(BaseModel):
     status: Optional[str] = None
     lead_id: Optional[str] = None
     project_id: Optional[str] = None
+
+
+
+# ---------- Company settings + Recurring invoices ----------
+LEAD_TEMPERATURES = ["hot", "warm", "cold"]
+
+
+class CompanySettings(BaseModel):
+    company_name: str = "Raybotix Digital"
+    tagline: str = ""
+    gst_number: str = ""
+    pan_number: str = ""
+    address: str = ""
+    city: str = ""
+    state: str = ""
+    pincode: str = ""
+    phone: str = ""
+    email: str = ""
+    website: str = ""
+    logo_url: str = ""
+    bank_name: str = ""
+    bank_account_name: str = ""
+    bank_account_number: str = ""
+    bank_ifsc: str = ""
+    bank_branch: str = ""
+    bank_upi: str = ""
+    invoice_footer: str = "Thank you for your business."
+    quotation_footer: str = "Looking forward to working together."
+
+
+class RecurringInvoiceCreate(BaseModel):
+    project_id: Optional[str] = None
+    lead_id: Optional[str] = None
+    client_name: str = ""
+    client_company: str = ""
+    client_email: str = ""
+    client_phone: str = ""
+    client_address: str = ""
+    items: List[LineItem] = Field(default_factory=list)
+    notes: str = ""
+    terms: str = ""
+    day_of_month: int = 1
+    active: bool = True
+    next_run_date: Optional[str] = None
+    currency: str = "INR"
+
+
+class RecurringInvoiceUpdate(BaseModel):
+    project_id: Optional[str] = None
+    lead_id: Optional[str] = None
+    client_name: Optional[str] = None
+    client_company: Optional[str] = None
+    client_email: Optional[str] = None
+    client_phone: Optional[str] = None
+    client_address: Optional[str] = None
+    items: Optional[List[LineItem]] = None
+    notes: Optional[str] = None
+    terms: Optional[str] = None
+    day_of_month: Optional[int] = None
+    active: Optional[bool] = None
+    next_run_date: Optional[str] = None

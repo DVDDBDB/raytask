@@ -5,7 +5,7 @@ from db import db
 from auth import get_current_user, require_crm_access, has_crm_access
 from models import (
     LeadCreate, LeadUpdate, LeadActivityCreate, LeadActivity,
-    LeadOnboardRequest, LEAD_STAGES,
+    LeadOnboardRequest, LEAD_STAGES, LEAD_TEMPERATURES,
 )
 from utils import now_iso, log_activity, push_notification
 import uuid
@@ -32,6 +32,7 @@ async def list_leads(
     stage: str = "",
     assigned_to_id: str = "",
     q: str = "",
+    include_onboarded: bool = False,
     user=Depends(require_crm_access),
 ):
     query = {}
@@ -46,6 +47,9 @@ async def list_leads(
             {"email": {"$regex": q, "$options": "i"}},
             {"phone": {"$regex": q, "$options": "i"}},
         ]
+    # Hide Onboarded leads by default unless explicitly requested
+    if not include_onboarded:
+        query["stage"] = {"$ne": "Onboarded"} if "stage" not in query else query["stage"]
     docs = await db.leads.find(query, {"_id": 0}).sort("updated_at", -1).to_list(5000)
     return [_serialize(d) for d in docs]
 
@@ -116,6 +120,8 @@ async def update_lead(lead_id: str, payload: LeadUpdate, user=Depends(require_cr
     update = {k: v for k, v in payload.model_dump(exclude_none=True).items()}
     if "stage" in update and update["stage"] not in LEAD_STAGES:
         raise HTTPException(status_code=400, detail=f"Invalid stage. Allowed: {LEAD_STAGES}")
+    if "temperature" in update and update["temperature"] not in LEAD_TEMPERATURES:
+        raise HTTPException(status_code=400, detail=f"Invalid temperature. Allowed: {LEAD_TEMPERATURES}")
 
     prev_stage = lead.get("stage")
     prev_assignee = lead.get("assigned_to_id")
@@ -129,6 +135,20 @@ async def update_lead(lead_id: str, payload: LeadUpdate, user=Depends(require_cr
         update["assigned_to_name"] = (assignee or {}).get("first_name", "") if assignee else ""
 
     update["updated_at"] = now_iso()
+
+    # When a lead is marked Lost, clear all pending follow-ups + next_step.
+    if update.get("stage") == "Lost":
+        update["follow_up_date"] = None
+        update["next_step"] = ""
+        update["lost_at"] = now_iso()
+        # Mark all activities done and drop their due_date so they leave any dashboards.
+        activities = lead.get("activities", []) or []
+        for a in activities:
+            a["done"] = True
+            if a.get("due_date"):
+                a["due_date"] = None
+        update["activities"] = activities
+
     await db.leads.update_one({"id": lead_id}, {"$set": update})
 
     # Log & notify
