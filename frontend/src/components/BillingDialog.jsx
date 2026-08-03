@@ -193,6 +193,7 @@ export default function BillingDialog({
   };
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl">
         <DialogHeader>
@@ -396,19 +397,20 @@ export default function BillingDialog({
           </Button>
         </DialogFooter>
       </DialogContent>
-
-      <PaymentDialog
-        open={paymentOpen}
-        invoice={initial}
-        onClose={() => setPaymentOpen(false)}
-        onRecord={recordPayment}
-      />
-      <RecurringDayDialog
-        open={recurringOpen}
-        onClose={() => setRecurringOpen(false)}
-        onSave={convertToRecurring}
-      />
     </Dialog>
+
+    <PaymentDialog
+      open={paymentOpen}
+      invoice={initial}
+      onClose={() => setPaymentOpen(false)}
+      onRecord={recordPayment}
+    />
+    <RecurringDayDialog
+      open={recurringOpen}
+      onClose={() => setRecurringOpen(false)}
+      onSave={convertToRecurring}
+    />
+    </>
   );
 }
 

@@ -567,10 +567,22 @@ export default function CRMPage() {
 }
 
 function QuickLogDialog({ open, lead, stages, onClose, onSaved }) {
+  const NEXT_STEP_OPTIONS = [
+    "Send proposal",
+    "Schedule discovery call",
+    "Send quotation",
+    "Follow-up call",
+    "Send contract",
+    "Payment reminder",
+    "Onboard client",
+    "Custom…",
+  ];
   const [kind, setKind] = React.useState("call");
   const [description, setDescription] = React.useState("");
   const [stage, setStage] = React.useState("");
   const [followUp, setFollowUp] = React.useState("");
+  const [nextStepChoice, setNextStepChoice] = React.useState("");
+  const [nextStepCustom, setNextStepCustom] = React.useState("");
   const [busy, setBusy] = React.useState(false);
 
   React.useEffect(() => {
@@ -579,6 +591,8 @@ function QuickLogDialog({ open, lead, stages, onClose, onSaved }) {
       setDescription("");
       setStage(lead.stage || "");
       setFollowUp(lead.follow_up_date ? lead.follow_up_date.slice(0, 16) : "");
+      setNextStepChoice("");
+      setNextStepCustom(lead.next_step || "");
     }
   }, [open, lead]);
 
@@ -593,6 +607,13 @@ function QuickLogDialog({ open, lead, stages, onClose, onSaved }) {
       if (stage && stage !== lead.stage) patch.stage = stage;
       if (followUp !== (lead.follow_up_date ? lead.follow_up_date.slice(0, 16) : "")) {
         patch.follow_up_date = followUp || null;
+      }
+      // Next step: dropdown OR custom text override
+      const finalNextStep = nextStepChoice && nextStepChoice !== "Custom…"
+        ? nextStepChoice
+        : (nextStepCustom || "").trim();
+      if (finalNextStep && finalNextStep !== (lead.next_step || "")) {
+        patch.next_step = finalNextStep;
       }
       let updated = lead;
       if (Object.keys(patch).length) {
@@ -649,6 +670,22 @@ function QuickLogDialog({ open, lead, stages, onClose, onSaved }) {
                       onChange={(e) => setDescription(e.target.value)}
                       data-testid="quicklog-desc"
                       placeholder="e.g. Client asked for quote by Friday, budget ₹1.5L" />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-[11px]">Next step</Label>
+            <Select value={nextStepChoice} onValueChange={setNextStepChoice}>
+              <SelectTrigger data-testid="quicklog-nextstep"><SelectValue placeholder="Pick a next step (optional)" /></SelectTrigger>
+              <SelectContent>
+                {NEXT_STEP_OPTIONS.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            {(nextStepChoice === "Custom…" || !nextStepChoice) && (
+              <Input value={nextStepCustom}
+                     onChange={(e) => setNextStepCustom(e.target.value)}
+                     placeholder={nextStepChoice === "Custom…" ? "Type your next step…" : "Or leave next step as: " + (lead.next_step || "—")}
+                     className="mt-1"
+                     data-testid="quicklog-nextstep-custom" />
+            )}
           </div>
           <div className="space-y-1">
             <Label className="text-[11px]">Next follow-up date</Label>

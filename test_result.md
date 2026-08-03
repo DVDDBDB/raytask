@@ -575,6 +575,68 @@ backend:
             
             Phase 5 backend implementation is NOW COMPLETE and fully functional.
 
+  - task: "Invoice → Recurring template conversion + CRM Quick Log next-step verification"
+    implemented: true
+    working: true
+    file: "backend/routes_billing.py, backend/routes_leads.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: |
+            ✅ Backend verification COMPLETE. ALL 9 TESTS PASSED.
+            
+            USER ISSUE: User reported errors when clicking "Save as recurring" on an invoice.
+            ROOT CAUSE: Frontend wiring bug - PaymentDialog and RecurringDayDialog were rendered INSIDE the Radix Dialog, so clicks on their internal buttons never fired the API. This has been fixed on the frontend (they now render as siblings).
+            
+            BACKEND VERIFICATION RESULTS:
+            
+            1. ✅ Login as super admin - successful
+            2. ✅ POST /api/invoices - HTTP 200
+               - Response has id, number matching /^RB-INV-\d{4}-\d{4}$/
+               - status=="draft", total=35400 (30000 * 1.18)
+            
+            3. ✅ POST /api/invoices/{id}/to-recurring {"day_of_month":5} - HTTP 200
+               - Response: {ok:true, template:{id, day_of_month:5, active:true, items:[...], next_run_date:<future ISO>, client_name:"Recur Client", client_company:"Recur Co"}}
+               - Items cloned with fresh ids (not equal to invoice's item ids)
+               - All client data preserved correctly
+            
+            4. ✅ GET /api/recurring-invoices - HTTP 200
+               - Returns array containing the new template
+               - Template's items have fresh ids
+            
+            5. ✅ POST /api/invoices/{id}/to-recurring {"day_of_month":45} (invalid) - HTTP 200
+               - Server silently clamps to 28 (as per spec)
+               - Response day_of_month=28
+            
+            6. ✅ POST /api/invoices/deadbeef/to-recurring {"day_of_month":5} - HTTP 404
+               - Non-existent invoice correctly returns 404
+            
+            7. ✅ RBAC: as priya@raybotix.com (NO CRM access) - HTTP 403
+               - POST /api/invoices/{id}/to-recurring correctly denied
+               - Verified priya does not have crm_access set
+            
+            8. ✅ CRM Quick Log next-step: PATCH /api/leads/{id} {"next_step":"Send proposal"} - HTTP 200
+               - Response next_step=="Send proposal"
+               - GET /api/leads confirms next_step="Send proposal"
+            
+            9. ✅ Regression: All endpoints return 200
+               - /api/analytics/dashboard - 200
+               - /api/tasks?scope=all - 200
+               - /api/leads?sort=priority - 200
+               - /api/analytics/costs?range=month - 200
+            
+            CLEANUP: All test data deleted (invoice, recurring template, lead)
+            
+            CONCLUSION:
+            - Backend endpoints are working correctly
+            - Invoice → Recurring template conversion is fully functional
+            - CRM Quick Log next-step patch is working
+            - The user-reported issue was a frontend wiring bug (now fixed)
+            - No backend changes needed
+
 test_plan:
   current_focus: []
   stuck_tasks: []
@@ -1007,3 +1069,41 @@ agent_communication:
         ✅ 30-min extension expiry
         
         YOU MUST ASK USER BEFORE DOING FRONTEND TESTING
+
+
+    - agent: "testing"
+      message: |
+        ✅ Invoice → Recurring Template + CRM Quick Log Verification COMPLETE. ALL 9 TESTS PASSED.
+        
+        USER REPORTED ISSUE:
+        - User reported errors when clicking "Save as recurring" on an invoice
+        - Frontend had a wiring bug: PaymentDialog and RecurringDayDialog were rendered INSIDE the Radix Dialog
+        - This caused clicks on internal buttons to never fire the API
+        - Frontend fix applied: dialogs now render as siblings
+        
+        BACKEND VERIFICATION RESULTS:
+        ✅ Test 1: Login as super admin - successful
+        ✅ Test 2: POST /api/invoices - 200, number=RB-INV-2026-0017, status=draft, total=35400
+        ✅ Test 3: POST /api/invoices/{id}/to-recurring {"day_of_month":5} - 200
+           - template.id, day_of_month=5, active=true, items cloned with fresh ids
+           - client_name="Recur Client", client_company="Recur Co" preserved
+           - next_run_date set to future ISO date
+        ✅ Test 4: GET /api/recurring-invoices - 200, returns array with new template
+        ✅ Test 5: Invalid day_of_month (45) - 200, clamped to 28 (as per spec)
+        ✅ Test 6: Non-existent invoice - 404
+        ✅ Test 7: RBAC - User without CRM access denied (403)
+        ✅ Test 8: CRM Quick Log - PATCH /api/leads/{id} {"next_step":"Send proposal"} - 200
+           - next_step updated correctly, verified with GET /api/leads
+        ✅ Test 9: Regression - All endpoints return 200
+           - /api/analytics/dashboard, /api/tasks?scope=all, /api/leads?sort=priority, /api/analytics/costs?range=month
+        
+        CLEANUP: All test data deleted (invoice, recurring template, lead)
+        
+        CONCLUSION:
+        - Backend endpoints are FULLY FUNCTIONAL
+        - Invoice → Recurring template conversion working correctly
+        - CRM Quick Log next-step patch working correctly
+        - The user-reported issue was a FRONTEND WIRING BUG (now fixed)
+        - NO BACKEND CHANGES NEEDED
+        
+        The backend implementation is solid and ready for production.

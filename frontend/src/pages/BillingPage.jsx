@@ -192,9 +192,11 @@ export default function BillingPage() {
             Quotations & Invoices
           </h1>
         </div>
-        <Button onClick={openNew} className="gap-1.5 rounded-full" data-testid="new-bill-button">
-          <Plus className="w-4 h-4" /> New {tab === "invoices" ? "invoice" : tab === "recurring" ? "recurring template" : "quotation"}
-        </Button>
+        {tab !== "recurring" && (
+          <Button onClick={openNew} className="gap-1.5 rounded-full" data-testid="new-bill-button">
+            <Plus className="w-4 h-4" /> New {tab === "invoices" ? "invoice" : "quotation"}
+          </Button>
+        )}
       </div>
 
       {/* Tabs */}
@@ -306,6 +308,12 @@ export default function BillingPage() {
           </tbody>
         </table>
       </div>
+      )}
+
+      {tab === "recurring" && (
+        <div className="card-flat p-4 text-xs text-muted-foreground">
+          Recurring templates are created from an existing invoice — open any invoice and click <b>Save as recurring</b>.
+        </div>
       )}
 
       {tab === "recurring" && (
