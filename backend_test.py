@@ -1,628 +1,628 @@
+#!/usr/bin/env python3
 """
-Backend test for Phase 1: Timer auto-stop at 18:00 IST + /tasks/resumable endpoint
+CRM Phase 2 Backend Testing Script
+Tests all 20 test cases for leads/inquiries functionality
 """
 import requests
-import os
-from datetime import datetime, timezone, timedelta
-from motor.motor_asyncio import AsyncIOMotorClient
-import asyncio
-import uuid
+import json
+from typing import Optional
 
-# Read environment variables
-MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017")
-DB_NAME = os.getenv("DB_NAME", "raybotix_digital")
 BASE_URL = "https://ray-task-hub.preview.emergentagent.com/api"
 
 # Test credentials
 SUPER_ADMIN_EMAIL = "superadmin@raybotix.com"
 SUPER_ADMIN_PASSWORD = "Admin@123"
-TEAM_MEMBER_EMAIL = "priya@raybotix.com"
-TEAM_MEMBER_PASSWORD = "Password@123"
+PRIYA_EMAIL = "priya@raybotix.com"
+PRIYA_PASSWORD = "Password@123"
 
-# IST timezone
-IST = timezone(timedelta(hours=5, minutes=30))
-
-# Global variables
+# Global state
 super_admin_token = None
 super_admin_id = None
-team_member_token = None
-team_member_id = None
-test_task_id = None
+priya_token = None
+priya_id = None
+test_lead_id = None
+test_activity_id = None
 test_project_id = None
 
 
-def login(email, password):
-    """Login and return token and user_id"""
-    response = requests.post(f"{BASE_URL}/auth/login", json={
-        "email": email,
-        "password": password
-    })
-    if response.status_code == 200:
-        data = response.json()
+def login(email: str, password: str) -> tuple[Optional[str], Optional[str]]:
+    """Login and return (token, user_id)"""
+    resp = requests.post(f"{BASE_URL}/auth/login", json={"email": email, "password": password})
+    if resp.status_code == 200:
+        data = resp.json()
         return data.get("token"), data.get("user", {}).get("id")
+    return None, None
+
+
+def headers(token: str) -> dict:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def test_1_login_super_admin():
+    """Test 1: Login as super admin"""
+    global super_admin_token, super_admin_id
+    print("\n[Test 1] Login as super admin")
+    super_admin_token, super_admin_id = login(SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD)
+    if super_admin_token and super_admin_id:
+        print(f"✅ PASS - Logged in as super admin (id: {super_admin_id})")
+        return True
     else:
-        print(f"❌ Login failed for {email}: {response.status_code} {response.text}")
-        return None, None
+        print("❌ FAIL - Could not login as super admin")
+        return False
 
 
-async def setup_db():
-    """Setup database connection and get user IDs"""
-    global super_admin_id, team_member_id, test_project_id
-    client = AsyncIOMotorClient(MONGO_URL)
-    db = client[DB_NAME]
+def test_2_get_stages():
+    """Test 2: GET /api/leads/stages"""
+    print("\n[Test 2] GET /api/leads/stages")
+    resp = requests.get(f"{BASE_URL}/leads/stages", headers=headers(super_admin_token))
+    expected = ["New", "Contacted", "Qualified", "Proposal", "Negotiation", "Onboarded", "Lost"]
     
-    # Get super admin ID
-    super_admin = await db.users.find_one({"email": SUPER_ADMIN_EMAIL}, {"_id": 0, "id": 1})
-    if super_admin:
-        super_admin_id = super_admin["id"]
-    
-    # Get team member ID
-    team_member = await db.users.find_one({"email": TEAM_MEMBER_EMAIL}, {"_id": 0, "id": 1})
-    if team_member:
-        team_member_id = team_member["id"]
-    
-    # Get a project ID for creating tasks
-    project = await db.projects.find_one({}, {"_id": 0, "id": 1})
-    if project:
-        test_project_id = project["id"]
-    
-    return db, client
-
-
-async def cleanup_auto_paused_sessions(db, user_id):
-    """Remove all auto-paused sessions for a user"""
-    result = await db.timer_sessions.delete_many({
-        "user_id": user_id,
-        "auto_paused": True
-    })
-    print(f"🧹 Cleaned up {result.deleted_count} auto-paused sessions for user {user_id}")
-
-
-async def cleanup_all_open_sessions(db, user_id):
-    """Close all open sessions for a user"""
-    result = await db.timer_sessions.update_many(
-        {"user_id": user_id, "ended_at": None},
-        {"$set": {"ended_at": datetime.now(timezone.utc).isoformat(), "duration_seconds": 0}}
-    )
-    print(f"🧹 Closed {result.modified_count} open sessions for user {user_id}")
-
-
-async def inject_yesterday_session(db, user_id, task_id):
-    """Inject a synthetic yesterday auto-paused session"""
-    now_ist = datetime.now(timezone.utc).astimezone(IST)
-    yday_18_ist = datetime(now_ist.year, now_ist.month, now_ist.day, 18, 0, tzinfo=IST) - timedelta(days=1)
-    yday_09_ist = yday_18_ist.replace(hour=9)
-    ended_utc = yday_18_ist.astimezone(timezone.utc).isoformat()
-    started_utc = yday_09_ist.astimezone(timezone.utc).isoformat()
-    
-    session_id = uuid.uuid4().hex
-    session_doc = {
-        "id": session_id,
-        "task_id": task_id,
-        "user_id": user_id,
-        "user_first_name": "Test",
-        "user_designation": "Developer",
-        "started_at": started_utc,
-        "ended_at": ended_utc,
-        "duration_seconds": 32400,  # 9 hours
-        "auto_paused": True,
-        "auto_paused_at": ended_utc,
-        "paused": False,
-    }
-    await db.timer_sessions.insert_one(session_doc)
-    
-    # Update task to have auto_paused_at and status="Paused"
-    await db.tasks.update_one(
-        {"id": task_id},
-        {"$set": {
-            "auto_paused_at": ended_utc,
-            "status": "Paused"
-        }}
-    )
-    
-    print(f"✅ Injected yesterday auto-paused session for task {task_id}")
-    return session_id
-
-
-async def inject_two_days_ago_session(db, user_id, task_id):
-    """Inject a synthetic two-days-ago auto-paused session"""
-    now_ist = datetime.now(timezone.utc).astimezone(IST)
-    two_days_ago_18_ist = datetime(now_ist.year, now_ist.month, now_ist.day, 18, 0, tzinfo=IST) - timedelta(days=2)
-    two_days_ago_09_ist = two_days_ago_18_ist.replace(hour=9)
-    ended_utc = two_days_ago_18_ist.astimezone(timezone.utc).isoformat()
-    started_utc = two_days_ago_09_ist.astimezone(timezone.utc).isoformat()
-    
-    session_id = uuid.uuid4().hex
-    session_doc = {
-        "id": session_id,
-        "task_id": task_id,
-        "user_id": user_id,
-        "user_first_name": "Test",
-        "user_designation": "Developer",
-        "started_at": started_utc,
-        "ended_at": ended_utc,
-        "duration_seconds": 32400,
-        "auto_paused": True,
-        "auto_paused_at": ended_utc,
-        "paused": False,
-    }
-    await db.timer_sessions.insert_one(session_doc)
-    print(f"✅ Injected two-days-ago auto-paused session for task {task_id}")
-    return session_id
-
-
-async def inject_today_open_session(db, user_id, task_id):
-    """Inject a fresh OPEN session for today 09:00 IST"""
-    now_ist = datetime.now(timezone.utc).astimezone(IST)
-    today_09_ist = datetime(now_ist.year, now_ist.month, now_ist.day, 9, 0, tzinfo=IST)
-    started_utc = today_09_ist.astimezone(timezone.utc).isoformat()
-    
-    session_id = uuid.uuid4().hex
-    session_doc = {
-        "id": session_id,
-        "task_id": task_id,
-        "user_id": user_id,
-        "user_first_name": "Test",
-        "user_designation": "Developer",
-        "started_at": started_utc,
-        "ended_at": None,
-        "duration_seconds": 0,
-        "auto_paused": False,
-        "paused": False,
-    }
-    await db.timer_sessions.insert_one(session_doc)
-    
-    # Update task to In Progress
-    await db.tasks.update_one(
-        {"id": task_id},
-        {"$set": {"status": "In Progress"}}
-    )
-    
-    print(f"✅ Injected today open session for task {task_id}")
-    return session_id
-
-
-def create_task(token, title, assignee_id):
-    """Create a task and return task_id"""
-    response = requests.post(
-        f"{BASE_URL}/tasks",
-        headers={"Authorization": f"Bearer {token}"},
-        json={
-            "title": title,
-            "description": "Test task for auto-pause",
-            "project_id": test_project_id,
-            "assignee_id": assignee_id,
-            "priority": "Medium",
-            "status": "Assigned",
-            "estimated_minutes": 60
-        }
-    )
-    if response.status_code == 200:
-        task = response.json()
-        print(f"✅ Created task: {task['id']} - {title}")
-        return task["id"]
-    else:
-        print(f"❌ Failed to create task: {response.status_code} {response.text}")
-        return None
-
-
-def test_resumable_endpoint(token, test_name, expected_status=200):
-    """Test GET /api/tasks/resumable"""
-    response = requests.get(
-        f"{BASE_URL}/tasks/resumable",
-        headers={"Authorization": f"Bearer {token}"}
-    )
-    print(f"\n{'='*80}")
-    print(f"TEST: {test_name}")
-    print(f"Status: {response.status_code}")
-    if response.status_code == expected_status:
-        if response.status_code == 200:
-            data = response.json()
-            print(f"Response: {len(data)} tasks")
-            for task in data:
-                print(f"  - Task ID: {task.get('id')}")
-                print(f"    Title: {task.get('title')}")
-                print(f"    Project: {task.get('project_name')}")
-                print(f"    Priority: {task.get('priority')}")
-                print(f"    Status: {task.get('status')}")
-                print(f"    Auto-paused at: {task.get('auto_paused_at')}")
-                print(f"    Yesterday seconds: {task.get('yesterday_seconds')}")
-            return True, data
+    if resp.status_code == 200:
+        stages = resp.json()
+        if stages == expected:
+            print(f"✅ PASS - Status: {resp.status_code}, Stages: {stages}")
+            return True
         else:
-            print(f"Response: {response.text}")
-            return True, None
+            print(f"❌ FAIL - Status: {resp.status_code}, Expected {expected}, Got: {stages}")
+            return False
     else:
-        print(f"❌ Expected {expected_status}, got {response.status_code}")
-        print(f"Response: {response.text}")
-        return False, None
-
-
-def test_resume_task(token, task_id):
-    """Test POST /api/tasks/{id}/resume"""
-    response = requests.post(
-        f"{BASE_URL}/tasks/{task_id}/resume",
-        headers={"Authorization": f"Bearer {token}"}
-    )
-    print(f"\nResuming task {task_id}: {response.status_code}")
-    if response.status_code == 200:
-        print("✅ Task resumed successfully")
-        return True
-    else:
-        print(f"❌ Failed to resume: {response.text}")
+        print(f"❌ FAIL - Status: {resp.status_code}, Body: {resp.text}")
         return False
 
 
-def test_pause_task(token, task_id):
-    """Test POST /api/tasks/{id}/pause"""
-    response = requests.post(
-        f"{BASE_URL}/tasks/{task_id}/pause",
-        headers={"Authorization": f"Bearer {token}"}
-    )
-    print(f"\nPausing task {task_id}: {response.status_code}")
-    if response.status_code == 200:
-        print("✅ Task paused successfully")
-        return True
-    else:
-        print(f"❌ Failed to pause: {response.text}")
-        return False
-
-
-def test_complete_task(token, task_id):
-    """Test POST /api/tasks/{id}/complete"""
-    response = requests.post(
-        f"{BASE_URL}/tasks/{task_id}/complete",
-        headers={"Authorization": f"Bearer {token}"}
-    )
-    print(f"\nCompleting task {task_id}: {response.status_code}")
-    if response.status_code == 200:
-        print("✅ Task completed successfully")
-        return True
-    else:
-        print(f"❌ Failed to complete: {response.text}")
-        return False
-
-
-def get_task(token, task_id):
-    """Get task details"""
-    response = requests.get(
-        f"{BASE_URL}/tasks/{task_id}",
-        headers={"Authorization": f"Bearer {token}"}
-    )
-    if response.status_code == 200:
-        return response.json()
-    else:
-        print(f"❌ Failed to get task: {response.status_code} {response.text}")
-        return None
-
-
-def test_regression_endpoints(token):
-    """Test regression endpoints"""
-    print(f"\n{'='*80}")
-    print("REGRESSION TESTS")
+def test_3_get_team():
+    """Test 3: GET /api/leads/team"""
+    print("\n[Test 3] GET /api/leads/team")
+    resp = requests.get(f"{BASE_URL}/leads/team", headers=headers(super_admin_token))
     
-    endpoints = [
-        "/analytics/dashboard",
-        "/analytics/costs?range=month",
-        "/tasks?scope=all"
+    if resp.status_code == 200:
+        team = resp.json()
+        # Should contain super_admin + admin + any crm_access users
+        has_super_admin = any(u.get("role") == "super_admin" for u in team)
+        print(f"✅ PASS - Status: {resp.status_code}, Team size: {len(team)}, Has super_admin: {has_super_admin}")
+        return True
+    else:
+        print(f"❌ FAIL - Status: {resp.status_code}, Body: {resp.text}")
+        return False
+
+
+def test_4_create_lead():
+    """Test 4: POST /api/leads - create new lead"""
+    global test_lead_id
+    print("\n[Test 4] POST /api/leads - create new lead")
+    
+    payload = {
+        "name": "Acme Client",
+        "company": "Acme Ltd",
+        "email": "c@acme.co",
+        "phone": "+91 90000 00001",
+        "source": "Website",
+        "stage": "New",
+        "next_step": "Send deck",
+        "follow_up_date": "2026-08-05T10:00:00Z",
+        "value_estimate": 250000
+    }
+    
+    resp = requests.post(f"{BASE_URL}/leads", json=payload, headers=headers(super_admin_token))
+    
+    if resp.status_code == 200:
+        lead = resp.json()
+        test_lead_id = lead.get("id")
+        has_id = bool(test_lead_id)
+        has_activities = "activities" in lead and isinstance(lead["activities"], list)
+        has_created_by = bool(lead.get("created_by_id"))
+        assigned_to_none = lead.get("assigned_to_id") in (None, "")
+        
+        if has_id and has_activities and has_created_by:
+            print(f"✅ PASS - Status: {resp.status_code}, Lead ID: {test_lead_id}, Activities: {lead['activities']}, Created by: {lead['created_by_id']}, Assigned to: {lead.get('assigned_to_id')}")
+            return True
+        else:
+            print(f"❌ FAIL - Missing required fields. has_id={has_id}, has_activities={has_activities}, has_created_by={has_created_by}")
+            return False
+    else:
+        print(f"❌ FAIL - Status: {resp.status_code}, Body: {resp.text}")
+        return False
+
+
+def test_5_list_leads():
+    """Test 5: GET /api/leads with filters"""
+    print("\n[Test 5] GET /api/leads with filters")
+    
+    # Test 5a: List all leads
+    resp = requests.get(f"{BASE_URL}/leads", headers=headers(super_admin_token))
+    if resp.status_code != 200:
+        print(f"❌ FAIL - List all leads failed: {resp.status_code}")
+        return False
+    
+    all_leads = resp.json()
+    has_test_lead = any(l.get("id") == test_lead_id for l in all_leads)
+    
+    # Test 5b: Filter by stage=New
+    resp = requests.get(f"{BASE_URL}/leads?stage=New", headers=headers(super_admin_token))
+    if resp.status_code != 200:
+        print(f"❌ FAIL - Filter by stage failed: {resp.status_code}")
+        return False
+    
+    new_leads = resp.json()
+    has_test_lead_in_new = any(l.get("id") == test_lead_id for l in new_leads)
+    
+    # Test 5c: Search by q=Acme
+    resp = requests.get(f"{BASE_URL}/leads?q=Acme", headers=headers(super_admin_token))
+    if resp.status_code != 200:
+        print(f"❌ FAIL - Search by q failed: {resp.status_code}")
+        return False
+    
+    search_leads = resp.json()
+    has_test_lead_in_search = any(l.get("id") == test_lead_id for l in search_leads)
+    
+    if has_test_lead and has_test_lead_in_new and has_test_lead_in_search:
+        print(f"✅ PASS - All filters work. Total leads: {len(all_leads)}, New leads: {len(new_leads)}, Search results: {len(search_leads)}")
+        return True
+    else:
+        print(f"❌ FAIL - Test lead not found in filters. has_test_lead={has_test_lead}, in_new={has_test_lead_in_new}, in_search={has_test_lead_in_search}")
+        return False
+
+
+def test_6_update_stage_valid():
+    """Test 6: PATCH /api/leads/{id} with valid stage"""
+    print("\n[Test 6] PATCH /api/leads/{id} - update stage to Contacted")
+    
+    payload = {"stage": "Contacted", "next_step": "Send proposal"}
+    resp = requests.patch(f"{BASE_URL}/leads/{test_lead_id}", json=payload, headers=headers(super_admin_token))
+    
+    if resp.status_code == 200:
+        lead = resp.json()
+        if lead.get("stage") == "Contacted":
+            print(f"✅ PASS - Status: {resp.status_code}, Stage: {lead['stage']}")
+            return True
+        else:
+            print(f"❌ FAIL - Stage not updated. Got: {lead.get('stage')}")
+            return False
+    else:
+        print(f"❌ FAIL - Status: {resp.status_code}, Body: {resp.text}")
+        return False
+
+
+def test_7_update_stage_invalid():
+    """Test 7: PATCH /api/leads/{id} with invalid stage"""
+    print("\n[Test 7] PATCH /api/leads/{id} - update stage to invalid 'Foo'")
+    
+    payload = {"stage": "Foo"}
+    resp = requests.patch(f"{BASE_URL}/leads/{test_lead_id}", json=payload, headers=headers(super_admin_token))
+    
+    if resp.status_code == 400:
+        print(f"✅ PASS - Status: {resp.status_code}, Correctly rejected invalid stage")
+        return True
+    else:
+        print(f"❌ FAIL - Status: {resp.status_code}, Expected 400. Body: {resp.text}")
+        return False
+
+
+def test_8_add_activity():
+    """Test 8: POST /api/leads/{id}/activities"""
+    global test_activity_id
+    print("\n[Test 8] POST /api/leads/{id}/activities - add activity")
+    
+    payload = {"kind": "call", "description": "Called client"}
+    resp = requests.post(f"{BASE_URL}/leads/{test_lead_id}/activities", json=payload, headers=headers(super_admin_token))
+    
+    if resp.status_code == 200:
+        activity = resp.json()
+        test_activity_id = activity.get("id")
+        if test_activity_id:
+            print(f"✅ PASS - Status: {resp.status_code}, Activity ID: {test_activity_id}")
+            return True
+        else:
+            print(f"❌ FAIL - No activity ID returned")
+            return False
+    else:
+        print(f"❌ FAIL - Status: {resp.status_code}, Body: {resp.text}")
+        return False
+
+
+def test_9_get_lead_with_activity():
+    """Test 9: GET /api/leads/{id} - verify activity is present"""
+    print("\n[Test 9] GET /api/leads/{id} - verify activity")
+    
+    resp = requests.get(f"{BASE_URL}/leads/{test_lead_id}", headers=headers(super_admin_token))
+    
+    if resp.status_code == 200:
+        lead = resp.json()
+        activities = lead.get("activities", [])
+        has_activity = any(a.get("id") == test_activity_id for a in activities)
+        
+        if has_activity:
+            print(f"✅ PASS - Status: {resp.status_code}, Activities count: {len(activities)}, Has test activity: {has_activity}")
+            return True
+        else:
+            print(f"❌ FAIL - Test activity not found. Activities: {activities}")
+            return False
+    else:
+        print(f"❌ FAIL - Status: {resp.status_code}, Body: {resp.text}")
+        return False
+
+
+def test_10_toggle_activity():
+    """Test 10: PATCH /api/leads/{id}/activities/{aid} - mark done"""
+    print("\n[Test 10] PATCH /api/leads/{id}/activities/{aid} - mark done")
+    
+    payload = {"done": True}
+    resp = requests.patch(f"{BASE_URL}/leads/{test_lead_id}/activities/{test_activity_id}", 
+                         json=payload, headers=headers(super_admin_token))
+    
+    if resp.status_code == 200:
+        activity = resp.json()
+        if activity.get("done") == True:
+            print(f"✅ PASS - Status: {resp.status_code}, Done: {activity['done']}")
+            return True
+        else:
+            print(f"❌ FAIL - Activity not marked done. Got: {activity.get('done')}")
+            return False
+    else:
+        print(f"❌ FAIL - Status: {resp.status_code}, Body: {resp.text}")
+        return False
+
+
+def test_11_assignment():
+    """Test 11: Assignment - assign to super admin (valid), then to Priya (no CRM access - should fail)"""
+    global priya_id
+    print("\n[Test 11] Assignment tests")
+    
+    # 11a: Assign to super admin (valid)
+    payload = {"assigned_to_id": super_admin_id}
+    resp = requests.patch(f"{BASE_URL}/leads/{test_lead_id}", json=payload, headers=headers(super_admin_token))
+    
+    if resp.status_code != 200:
+        print(f"❌ FAIL - Could not assign to super admin. Status: {resp.status_code}")
+        return False
+    
+    print(f"  ✓ Assigned to super admin successfully")
+    
+    # 11b: Get Priya's ID
+    resp = requests.get(f"{BASE_URL}/users", headers=headers(super_admin_token))
+    if resp.status_code != 200:
+        print(f"❌ FAIL - Could not get users list")
+        return False
+    
+    users = resp.json()
+    priya = next((u for u in users if u.get("email") == PRIYA_EMAIL), None)
+    if not priya:
+        print(f"❌ FAIL - Could not find Priya in users list")
+        return False
+    
+    priya_id = priya.get("id")
+    print(f"  ✓ Found Priya (id: {priya_id})")
+    
+    # 11c: Try to assign to Priya (should fail - no CRM access)
+    payload = {"assigned_to_id": priya_id}
+    resp = requests.patch(f"{BASE_URL}/leads/{test_lead_id}", json=payload, headers=headers(super_admin_token))
+    
+    if resp.status_code == 400:
+        print(f"✅ PASS - Correctly rejected assignment to user without CRM access (status: {resp.status_code})")
+        return True
+    else:
+        print(f"❌ FAIL - Expected 400, got {resp.status_code}. Body: {resp.text}")
+        return False
+
+
+def test_12_grant_crm_and_assign():
+    """Test 12: Grant CRM access to Priya, then assign lead"""
+    print("\n[Test 12] Grant CRM access and assign")
+    
+    # 12a: Grant CRM access
+    payload = {"crm_access": True}
+    resp = requests.patch(f"{BASE_URL}/users/{priya_id}", json=payload, headers=headers(super_admin_token))
+    
+    if resp.status_code != 200:
+        print(f"❌ FAIL - Could not grant CRM access. Status: {resp.status_code}, Body: {resp.text}")
+        return False
+    
+    print(f"  ✓ Granted CRM access to Priya")
+    
+    # 12b: Assign lead to Priya
+    payload = {"assigned_to_id": priya_id}
+    resp = requests.patch(f"{BASE_URL}/leads/{test_lead_id}", json=payload, headers=headers(super_admin_token))
+    
+    if resp.status_code == 200:
+        lead = resp.json()
+        if lead.get("assigned_to_id") == priya_id and lead.get("assigned_to_name"):
+            print(f"✅ PASS - Status: {resp.status_code}, Assigned to: {lead['assigned_to_id']}, Name: {lead['assigned_to_name']}")
+            return True
+        else:
+            print(f"❌ FAIL - Assignment not reflected. assigned_to_id: {lead.get('assigned_to_id')}, assigned_to_name: {lead.get('assigned_to_name')}")
+            return False
+    else:
+        print(f"❌ FAIL - Status: {resp.status_code}, Body: {resp.text}")
+        return False
+
+
+def test_13_rbac_pre_grant():
+    """Test 13: RBAC - Priya without CRM access should get 403"""
+    print("\n[Test 13] RBAC pre-grant (simulate by removing CRM access temporarily)")
+    
+    # First, remove CRM access from Priya
+    payload = {"crm_access": False}
+    resp = requests.patch(f"{BASE_URL}/users/{priya_id}", json=payload, headers=headers(super_admin_token))
+    if resp.status_code != 200:
+        print(f"❌ FAIL - Could not remove CRM access. Status: {resp.status_code}")
+        return False
+    
+    print(f"  ✓ Removed CRM access from Priya")
+    
+    # Get fresh token for Priya
+    priya_token_temp, _ = login(PRIYA_EMAIL, PRIYA_PASSWORD)
+    if not priya_token_temp:
+        print(f"❌ FAIL - Could not login as Priya")
+        return False
+    
+    # Try to access leads
+    resp = requests.get(f"{BASE_URL}/leads", headers=headers(priya_token_temp))
+    
+    if resp.status_code == 403:
+        print(f"✅ PASS - Correctly denied access (status: {resp.status_code})")
+        return True
+    else:
+        print(f"❌ FAIL - Expected 403, got {resp.status_code}. Body: {resp.text}")
+        return False
+
+
+def test_14_rbac_post_grant():
+    """Test 14: RBAC - Priya with CRM access should get 200"""
+    global priya_token
+    print("\n[Test 14] RBAC post-grant")
+    
+    # Grant CRM access back
+    payload = {"crm_access": True}
+    resp = requests.patch(f"{BASE_URL}/users/{priya_id}", json=payload, headers=headers(super_admin_token))
+    if resp.status_code != 200:
+        print(f"❌ FAIL - Could not grant CRM access. Status: {resp.status_code}")
+        return False
+    
+    print(f"  ✓ Granted CRM access to Priya")
+    
+    # Get fresh token for Priya
+    priya_token, _ = login(PRIYA_EMAIL, PRIYA_PASSWORD)
+    if not priya_token:
+        print(f"❌ FAIL - Could not login as Priya")
+        return False
+    
+    # Try to access leads
+    resp = requests.get(f"{BASE_URL}/leads", headers=headers(priya_token))
+    
+    if resp.status_code == 200:
+        leads = resp.json()
+        print(f"✅ PASS - Status: {resp.status_code}, Leads count: {len(leads)}")
+        return True
+    else:
+        print(f"❌ FAIL - Status: {resp.status_code}, Body: {resp.text}")
+        return False
+
+
+def test_15_onboard_lead():
+    """Test 15: POST /api/leads/{id}/onboard - create project"""
+    global test_project_id
+    print("\n[Test 15] POST /api/leads/{id}/onboard - first call")
+    
+    resp = requests.post(f"{BASE_URL}/leads/{test_lead_id}/onboard", json={}, headers=headers(super_admin_token))
+    
+    if resp.status_code == 200:
+        data = resp.json()
+        ok = data.get("ok")
+        project = data.get("project", {})
+        lead = data.get("lead", {})
+        test_project_id = project.get("id")
+        
+        checks = {
+            "ok": ok == True,
+            "project_id": bool(test_project_id),
+            "project_name": bool(project.get("name")),
+            "lead_stage": lead.get("stage") == "Onboarded",
+            "lead_project_id": lead.get("project_id") == test_project_id
+        }
+        
+        if all(checks.values()):
+            print(f"✅ PASS - Status: {resp.status_code}, Project ID: {test_project_id}, Lead stage: {lead['stage']}")
+            
+            # Verify project exists in projects list
+            resp = requests.get(f"{BASE_URL}/projects", headers=headers(super_admin_token))
+            if resp.status_code == 200:
+                projects = resp.json()
+                has_project = any(p.get("id") == test_project_id for p in projects)
+                if has_project:
+                    print(f"  ✓ Project found in /api/projects")
+                else:
+                    print(f"  ⚠ Project NOT found in /api/projects")
+            
+            return True
+        else:
+            print(f"❌ FAIL - Missing required fields: {checks}")
+            return False
+    else:
+        print(f"❌ FAIL - Status: {resp.status_code}, Body: {resp.text}")
+        return False
+
+
+def test_16_onboard_idempotent():
+    """Test 16: POST /api/leads/{id}/onboard - second call (idempotent)"""
+    print("\n[Test 16] POST /api/leads/{id}/onboard - second call (idempotent)")
+    
+    resp = requests.post(f"{BASE_URL}/leads/{test_lead_id}/onboard", json={}, headers=headers(super_admin_token))
+    
+    if resp.status_code == 200:
+        data = resp.json()
+        already_onboarded = data.get("already_onboarded")
+        project = data.get("project", {})
+        project_id = project.get("id")
+        
+        if already_onboarded == True and project_id == test_project_id:
+            print(f"✅ PASS - Status: {resp.status_code}, already_onboarded: {already_onboarded}, Same project ID: {project_id}")
+            return True
+        else:
+            print(f"❌ FAIL - already_onboarded: {already_onboarded}, project_id: {project_id} (expected: {test_project_id})")
+            return False
+    else:
+        print(f"❌ FAIL - Status: {resp.status_code}, Body: {resp.text}")
+        return False
+
+
+def test_17_follow_ups():
+    """Test 17: GET /api/leads/follow-ups/upcoming - onboarded lead should NOT appear"""
+    print("\n[Test 17] GET /api/leads/follow-ups/upcoming?days=90")
+    
+    resp = requests.get(f"{BASE_URL}/leads/follow-ups/upcoming?days=90", headers=headers(super_admin_token))
+    
+    if resp.status_code == 200:
+        leads = resp.json()
+        has_onboarded_lead = any(l.get("id") == test_lead_id for l in leads)
+        
+        if not has_onboarded_lead:
+            print(f"✅ PASS - Status: {resp.status_code}, Onboarded lead correctly excluded. Follow-ups count: {len(leads)}")
+            return True
+        else:
+            print(f"❌ FAIL - Onboarded lead should NOT appear in follow-ups")
+            return False
+    else:
+        print(f"❌ FAIL - Status: {resp.status_code}, Body: {resp.text}")
+        return False
+
+
+def test_18_delete_lead():
+    """Test 18: DELETE /api/leads/{id} - delete existing and non-existing"""
+    print("\n[Test 18] DELETE /api/leads/{id}")
+    
+    # 18a: Delete existing lead
+    resp = requests.delete(f"{BASE_URL}/leads/{test_lead_id}", headers=headers(super_admin_token))
+    
+    if resp.status_code != 200:
+        print(f"❌ FAIL - Could not delete lead. Status: {resp.status_code}, Body: {resp.text}")
+        return False
+    
+    print(f"  ✓ Deleted lead successfully")
+    
+    # 18b: Try to delete non-existing lead
+    fake_id = "nonexistent-lead-id-12345"
+    resp = requests.delete(f"{BASE_URL}/leads/{fake_id}", headers=headers(super_admin_token))
+    
+    if resp.status_code == 404:
+        print(f"✅ PASS - Correctly returned 404 for non-existing lead")
+        return True
+    else:
+        print(f"❌ FAIL - Expected 404, got {resp.status_code}. Body: {resp.text}")
+        return False
+
+
+def test_19_regression():
+    """Test 19: Regression tests - verify other endpoints still work"""
+    print("\n[Test 19] Regression tests")
+    
+    tests = [
+        ("GET /api/analytics/dashboard", f"{BASE_URL}/analytics/dashboard"),
+        ("GET /api/tasks?scope=all", f"{BASE_URL}/tasks?scope=all"),
+        ("GET /api/analytics/costs?range=month", f"{BASE_URL}/analytics/costs?range=month"),
     ]
     
     all_passed = True
-    for endpoint in endpoints:
-        response = requests.get(
-            f"{BASE_URL}{endpoint}",
-            headers={"Authorization": f"Bearer {token}"}
-        )
-        if response.status_code == 200:
-            print(f"✅ GET {endpoint} - 200")
+    for name, url in tests:
+        resp = requests.get(url, headers=headers(super_admin_token))
+        if resp.status_code == 200:
+            print(f"  ✓ {name} - Status: {resp.status_code}")
         else:
-            print(f"❌ GET {endpoint} - {response.status_code}")
+            print(f"  ✗ {name} - Status: {resp.status_code}, Body: {resp.text}")
             all_passed = False
     
-    return all_passed
+    if all_passed:
+        print(f"✅ PASS - All regression tests passed")
+        return True
+    else:
+        print(f"❌ FAIL - Some regression tests failed")
+        return False
 
 
-async def test_autostop_tick(db):
-    """Test autostop._tick() function directly"""
-    print(f"\n{'='*80}")
-    print("TEST: Autostop unit test - _tick() function")
+def test_20_cleanup():
+    """Test 20: Cleanup - delete test project and revoke Priya's CRM access"""
+    print("\n[Test 20] Cleanup")
     
-    # Set environment variables before importing autostop
-    os.environ['MONGO_URL'] = MONGO_URL
-    os.environ['DB_NAME'] = DB_NAME
-    
-    # Import autostop module
-    import sys
-    sys.path.insert(0, '/app/backend')
-    import autostop
-    
-    # Check current IST time
-    now_ist = datetime.now(timezone.utc).astimezone(IST)
-    print(f"Current IST time: {now_ist.strftime('%Y-%m-%d %H:%M:%S')}")
-    
-    # Create a test task for this
-    task_id = uuid.uuid4().hex
-    task_doc = {
-        "id": task_id,
-        "title": "Autostop tick test task",
-        "description": "Test",
-        "project_id": test_project_id,
-        "assignee_id": super_admin_id,
-        "creator_id": super_admin_id,
-        "priority": "Medium",
-        "status": "In Progress",
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-        "completed_at": None,
-        "workflow": [],
-        "reassignment_history": [],
-    }
-    await db.tasks.insert_one(task_doc)
-    
-    # Inject today open session starting at 09:00 IST
-    session_id = await inject_today_open_session(db, super_admin_id, task_id)
-    
-    # Call _tick()
-    print("Calling autostop._tick()...")
-    paused_count = await autostop._tick()
-    print(f"Auto-paused {paused_count} sessions")
-    
-    # Check if session was updated
-    session = await db.timer_sessions.find_one({"id": session_id}, {"_id": 0})
-    task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
-    
-    result = False
-    if now_ist.hour >= 18:
-        # After 18:00 IST, session should be auto-paused
-        if session.get("ended_at") and session.get("auto_paused"):
-            print("✅ Session was auto-paused (after 18:00 IST)")
-            print(f"   ended_at: {session.get('ended_at')}")
-            print(f"   duration_seconds: {session.get('duration_seconds')}")
-            print(f"   auto_paused: {session.get('auto_paused')}")
-            print(f"   Task status: {task.get('status')}")
-            print(f"   Task auto_paused_at: {task.get('auto_paused_at')}")
-            result = True
+    # 20a: Delete test project
+    if test_project_id:
+        resp = requests.delete(f"{BASE_URL}/projects/{test_project_id}", headers=headers(super_admin_token))
+        if resp.status_code == 200:
+            print(f"  ✓ Deleted test project")
         else:
-            print("❌ Session was NOT auto-paused (expected after 18:00 IST)")
-            result = False
+            print(f"  ⚠ Could not delete test project. Status: {resp.status_code}")
+    
+    # 20b: Revoke Priya's CRM access
+    payload = {"crm_access": False}
+    resp = requests.patch(f"{BASE_URL}/users/{priya_id}", json=payload, headers=headers(super_admin_token))
+    
+    if resp.status_code == 200:
+        print(f"  ✓ Revoked Priya's CRM access")
+        print(f"✅ PASS - Cleanup completed")
+        return True
     else:
-        # Before 18:00 IST, session should NOT be auto-paused
-        if not session.get("ended_at"):
-            print("✅ Session was NOT auto-paused (before 18:00 IST - correct)")
-            print(f"   Current IST hour: {now_ist.hour}")
-            result = True
-        else:
-            print("❌ Session was auto-paused (unexpected before 18:00 IST)")
-            result = False
-    
-    # Clean up: close the open session if it's still open
-    if not session.get("ended_at"):
-        await db.timer_sessions.update_one(
-            {"id": session_id},
-            {"$set": {"ended_at": datetime.now(timezone.utc).isoformat(), "duration_seconds": 100}}
-        )
-        print("🧹 Cleaned up open session from autostop test")
-    
-    return result
+        print(f"  ⚠ Could not revoke CRM access. Status: {resp.status_code}")
+        print(f"⚠ PARTIAL - Cleanup partially completed")
+        return True  # Don't fail the test for cleanup issues
 
 
-async def main():
-    """Main test runner"""
-    global super_admin_token, team_member_token, test_task_id
+def main():
+    """Run all tests"""
+    print("=" * 80)
+    print("CRM PHASE 2 BACKEND TESTING")
+    print("=" * 80)
     
-    print("="*80)
-    print("PHASE 1 BACKEND TESTS: Timer auto-stop at 18:00 IST + /tasks/resumable")
-    print("="*80)
+    tests = [
+        test_1_login_super_admin,
+        test_2_get_stages,
+        test_3_get_team,
+        test_4_create_lead,
+        test_5_list_leads,
+        test_6_update_stage_valid,
+        test_7_update_stage_invalid,
+        test_8_add_activity,
+        test_9_get_lead_with_activity,
+        test_10_toggle_activity,
+        test_11_assignment,
+        test_12_grant_crm_and_assign,
+        test_13_rbac_pre_grant,
+        test_14_rbac_post_grant,
+        test_15_onboard_lead,
+        test_16_onboard_idempotent,
+        test_17_follow_ups,
+        test_18_delete_lead,
+        test_19_regression,
+        test_20_cleanup,
+    ]
     
-    # Setup database
-    db, client = await setup_db()
+    results = []
+    for test in tests:
+        try:
+            result = test()
+            results.append((test.__name__, result))
+        except Exception as e:
+            print(f"❌ EXCEPTION in {test.__name__}: {e}")
+            results.append((test.__name__, False))
     
-    # Login
-    print("\n1. Logging in...")
-    super_admin_token, _ = login(SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD)
-    team_member_token, _ = login(TEAM_MEMBER_EMAIL, TEAM_MEMBER_PASSWORD)
+    print("\n" + "=" * 80)
+    print("TEST SUMMARY")
+    print("=" * 80)
     
-    if not super_admin_token:
-        print("❌ Failed to login as super admin")
-        return
+    passed = sum(1 for _, result in results if result)
+    total = len(results)
     
-    print(f"✅ Logged in as super admin")
-    print(f"✅ Super admin ID: {super_admin_id}")
+    for name, result in results:
+        status = "✅ PASS" if result else "❌ FAIL"
+        print(f"{status} - {name}")
     
-    # Test 2: GET /api/tasks/resumable BEFORE injection
-    await cleanup_auto_paused_sessions(db, super_admin_id)
-    await cleanup_all_open_sessions(db, super_admin_id)
-    success, data = test_resumable_endpoint(super_admin_token, "Test 2: GET /resumable BEFORE injection (should be empty)")
-    if success and len(data) == 0:
-        print("✅ Test 2 PASSED")
+    print(f"\nTotal: {passed}/{total} tests passed")
+    
+    if passed == total:
+        print("\n🎉 ALL TESTS PASSED!")
     else:
-        print("❌ Test 2 FAILED")
+        print(f"\n⚠️  {total - passed} test(s) failed")
     
-    # Create a test task
-    test_task_id = create_task(super_admin_token, "Auto-pause test task", super_admin_id)
-    if not test_task_id:
-        print("❌ Failed to create test task")
-        return
-    
-    # Test 3: Inject synthetic yesterday auto-paused session
-    print(f"\n{'='*80}")
-    print("TEST 3: Inject yesterday auto-paused session")
-    session_id = await inject_yesterday_session(db, super_admin_id, test_task_id)
-    
-    # Test 4: GET /api/tasks/resumable AFTER injection
-    success, data = test_resumable_endpoint(super_admin_token, "Test 4: GET /resumable AFTER injection")
-    if success and len(data) > 0:
-        task = data[0]
-        required_keys = ["id", "title", "project_name", "priority", "status", "auto_paused_at", "yesterday_seconds"]
-        has_all_keys = all(key in task for key in required_keys)
-        if has_all_keys and task.get("yesterday_seconds", 0) > 0:
-            print("✅ Test 4 PASSED - Response includes task with all required keys")
-        else:
-            print("❌ Test 4 FAILED - Missing keys or yesterday_seconds <= 0")
-    else:
-        print("❌ Test 4 FAILED")
-    
-    # Test 5: POST /api/tasks/{id}/resume
-    print(f"\n{'='*80}")
-    print("TEST 5: Resume task")
-    if test_resume_task(super_admin_token, test_task_id):
-        # Check that task no longer appears in resumable
-        success, data = test_resumable_endpoint(super_admin_token, "Test 5b: GET /resumable after resume (should be empty)")
-        if success and len(data) == 0:
-            print("✅ Test 5 PASSED - Task no longer in resumable list")
-            
-            # Check that auto_paused_at is removed
-            task = get_task(super_admin_token, test_task_id)
-            if task and "auto_paused_at" not in task:
-                print("✅ Test 5c PASSED - auto_paused_at removed from task")
-            else:
-                print("❌ Test 5c FAILED - auto_paused_at still present")
-        else:
-            print("❌ Test 5 FAILED")
-    else:
-        print("❌ Test 5 FAILED")
-    
-    # Test 6: POST /api/tasks/{id}/pause
-    print(f"\n{'='*80}")
-    print("TEST 6: Pause task (auto_paused_at should NOT reappear)")
-    if test_pause_task(super_admin_token, test_task_id):
-        task = get_task(super_admin_token, test_task_id)
-        if task:
-            if task.get("status") == "Paused" and "auto_paused_at" not in task:
-                print("✅ Test 6 PASSED - Task paused, auto_paused_at NOT present")
-            else:
-                print(f"❌ Test 6 FAILED - status={task.get('status')}, auto_paused_at present: {'auto_paused_at' in task}")
-        else:
-            print("❌ Test 6 FAILED - Could not get task")
-    else:
-        print("❌ Test 6 FAILED")
-    
-    # Test 7: Inject two-days-ago session
-    print(f"\n{'='*80}")
-    print("TEST 7: Inject two-days-ago auto-paused session")
-    test_task_id_2 = create_task(super_admin_token, "Two days ago test task", super_admin_id)
-    if test_task_id_2:
-        await inject_two_days_ago_session(db, super_admin_id, test_task_id_2)
-        success, data = test_resumable_endpoint(super_admin_token, "Test 7: GET /resumable (should NOT include two-days-ago)")
-        # Should not include the two-days-ago task
-        task_ids = [t["id"] for t in data]
-        if test_task_id_2 not in task_ids:
-            print("✅ Test 7 PASSED - Two-days-ago task NOT in resumable list")
-        else:
-            print("❌ Test 7 FAILED - Two-days-ago task in resumable list")
-    else:
-        print("❌ Test 7 FAILED - Could not create task")
-    
-    # Test 8: Complete an auto-paused task
-    print(f"\n{'='*80}")
-    print("TEST 8: Complete an auto-paused task")
-    test_task_id_3 = create_task(super_admin_token, "Complete test task", super_admin_id)
-    if test_task_id_3:
-        await inject_yesterday_session(db, super_admin_id, test_task_id_3)
-        # Resume first
-        test_resume_task(super_admin_token, test_task_id_3)
-        # Complete
-        if test_complete_task(super_admin_token, test_task_id_3):
-            success, data = test_resumable_endpoint(super_admin_token, "Test 8: GET /resumable (should NOT include completed)")
-            task_ids = [t["id"] for t in data]
-            if test_task_id_3 not in task_ids:
-                print("✅ Test 8 PASSED - Completed task NOT in resumable list")
-            else:
-                print("❌ Test 8 FAILED - Completed task in resumable list")
-        else:
-            print("❌ Test 8 FAILED - Could not complete task")
-    else:
-        print("❌ Test 8 FAILED - Could not create task")
-    
-    # Test 9: RBAC - team member
-    print(f"\n{'='*80}")
-    print("TEST 9: RBAC - Team member (Priya)")
-    if team_member_token:
-        # Clean up any auto-paused sessions for Priya
-        await cleanup_auto_paused_sessions(db, team_member_id)
-        success, data = test_resumable_endpoint(team_member_token, "Test 9: GET /resumable as team member")
-        if success and len(data) == 0:
-            print("✅ Test 9 PASSED - Team member gets empty list (no auto-paused sessions)")
-        else:
-            print("❌ Test 9 FAILED")
-    else:
-        print("⚠️  Test 9 SKIPPED - Could not login as team member")
-    
-    # Test 10: Autostop unit test
-    await test_autostop_tick(db)
-    
-    # Test 11: Regression - existing timer endpoints
-    print(f"\n{'='*80}")
-    print("TEST 11: Regression - Timer endpoints")
-    test_task_id_4 = create_task(super_admin_token, "Regression test task", super_admin_id)
-    if test_task_id_4:
-        # Test start
-        response = requests.post(
-            f"{BASE_URL}/tasks/{test_task_id_4}/start",
-            headers={"Authorization": f"Bearer {super_admin_token}"}
-        )
-        if response.status_code == 200:
-            print("✅ POST /start - 200")
-        else:
-            print(f"❌ POST /start - {response.status_code}: {response.text}")
-        
-        # Test pause
-        response = requests.post(
-            f"{BASE_URL}/tasks/{test_task_id_4}/pause",
-            headers={"Authorization": f"Bearer {super_admin_token}"}
-        )
-        if response.status_code == 200:
-            print("✅ POST /pause - 200")
-        else:
-            print(f"❌ POST /pause - {response.status_code}: {response.text}")
-        
-        # Test resume
-        response = requests.post(
-            f"{BASE_URL}/tasks/{test_task_id_4}/resume",
-            headers={"Authorization": f"Bearer {super_admin_token}"}
-        )
-        if response.status_code == 200:
-            print("✅ POST /resume - 200")
-        else:
-            print(f"❌ POST /resume - {response.status_code}: {response.text}")
-        
-        # Test complete
-        response = requests.post(
-            f"{BASE_URL}/tasks/{test_task_id_4}/complete",
-            headers={"Authorization": f"Bearer {super_admin_token}"}
-        )
-        if response.status_code == 200:
-            print("✅ POST /complete - 200")
-        else:
-            print(f"❌ POST /complete - {response.status_code}: {response.text}")
-        
-        # Test 403 for non-assignee (create a new task for this)
-        test_task_id_5 = create_task(super_admin_token, "Non-assignee test task", super_admin_id)
-        if team_member_token and test_task_id_5:
-            response = requests.post(
-                f"{BASE_URL}/tasks/{test_task_id_5}/start",
-                headers={"Authorization": f"Bearer {team_member_token}"}
-            )
-            if response.status_code == 403:
-                print("✅ POST /start as non-assignee - 403")
-            else:
-                print(f"❌ POST /start as non-assignee - {response.status_code} (expected 403)")
-    else:
-        print("❌ Test 11 FAILED - Could not create task")
-    
-    # Test 12: Regression - analytics endpoints
-    test_regression_endpoints(super_admin_token)
-    
-    # Cleanup
-    print(f"\n{'='*80}")
-    print("CLEANUP")
-    await cleanup_auto_paused_sessions(db, super_admin_id)
-    await cleanup_auto_paused_sessions(db, team_member_id)
-    
-    client.close()
-    print("\n" + "="*80)
-    print("ALL TESTS COMPLETED")
-    print("="*80)
+    return passed == total
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    success = main()
+    exit(0 if success else 1)

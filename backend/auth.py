@@ -71,3 +71,16 @@ def require_roles(*roles):
 
 def can_see_costs(user: dict) -> bool:
     return user.get("role") in ("super_admin", "admin") or "view_costs" in user.get("permissions", [])
+
+
+def has_crm_access(user: dict) -> bool:
+    return (
+        user.get("role") in ("super_admin", "admin")
+        or bool(user.get("crm_access"))
+    )
+
+
+async def require_crm_access(user=Depends(get_current_user)):
+    if not has_crm_access(user):
+        raise HTTPException(status_code=403, detail="CRM access required")
+    return user

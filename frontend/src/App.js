@@ -22,6 +22,7 @@ import StaffManagement from "@/pages/StaffManagement";
 import Settings from "@/pages/Settings";
 import Profile from "@/pages/Profile";
 import ActivityLog from "@/pages/ActivityLog";
+import CRMPage from "@/pages/CRMPage";
 
 function Private({ children, roles }) {
   const { user, loading } = useAuth();
@@ -29,6 +30,16 @@ function Private({ children, roles }) {
   if (loading) return null;
   if (!user) return <Navigate to="/login" state={{ from: location }} replace />;
   if (roles && !roles.includes(user.role)) return <Navigate to="/" replace />;
+  return children;
+}
+
+function PrivateCRM({ children }) {
+  const { user, loading } = useAuth();
+  const location = useLocation();
+  if (loading) return null;
+  if (!user) return <Navigate to="/login" state={{ from: location }} replace />;
+  const allowed = user.role === "super_admin" || user.role === "admin" || !!user.crm_access;
+  if (!allowed) return <Navigate to="/" replace />;
   return children;
 }
 
@@ -49,6 +60,8 @@ function AppRoutes() {
         <Route path="analytics" element={<Analytics />} />
         <Route path="cost-analytics"
                element={<Private roles={["super_admin", "admin"]}><CostAnalytics /></Private>} />
+        <Route path="crm"
+               element={<PrivateCRM><CRMPage /></PrivateCRM>} />
         <Route path="staff"
                element={<Private roles={["super_admin", "admin"]}><StaffManagement /></Private>} />
         <Route path="settings"

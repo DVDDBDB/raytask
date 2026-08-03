@@ -47,6 +47,7 @@ export default function StaffManagement() {
       working_hours_per_day: parseFloat(editUser.working_hours_per_day || 8),
       working_days_per_month: parseInt(editUser.working_days_per_month || 25),
       avatar_url: editUser.avatar_url,
+      crm_access: !!editUser.crm_access,
     };
     await api.patch(`/users/${editUser.id}`, payload);
     toast.success("Saved");
@@ -210,6 +211,23 @@ export default function StaffManagement() {
                 <div className="space-y-1.5"><Label>Hours / day</Label><Input type="number" value={editUser.working_hours_per_day} onChange={(e) => setEditUser({ ...editUser, working_hours_per_day: e.target.value })} /></div>
                 <div className="space-y-1.5"><Label>Days / month</Label><Input type="number" value={editUser.working_days_per_month} onChange={(e) => setEditUser({ ...editUser, working_days_per_month: e.target.value })} /></div>
                 <div className="space-y-1.5 col-span-2"><Label>Avatar URL</Label><Input value={editUser.avatar_url || ""} onChange={(e) => setEditUser({ ...editUser, avatar_url: e.target.value })} /></div>
+                <div className="col-span-2 flex items-center justify-between rounded-md border border-border p-3 mt-1">
+                  <div>
+                    <div className="text-sm font-semibold">CRM Access</div>
+                    <div className="text-[11px] text-muted-foreground">
+                      Grants this teammate access to the CRM (Leads, Inquiries, Quotations, Invoices).
+                      Super Admins & Admins always have access.
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    className="h-5 w-5 accent-primary"
+                    checked={!!editUser.crm_access}
+                    onChange={(e) => setEditUser({ ...editUser, crm_access: e.target.checked })}
+                    data-testid="edit-crm-access-toggle"
+                    disabled={editUser.role === "super_admin" || editUser.role === "admin"}
+                  />
+                </div>
               </div>
             </div>
           )}

@@ -28,6 +28,7 @@ class UserBase(BaseModel):
     working_days_per_month: int = 25
     theme: str = "system"
     permissions: List[str] = Field(default_factory=list)
+    crm_access: bool = False
 
 
 class UserCreate(BaseModel):
@@ -70,6 +71,7 @@ class UserUpdateAdmin(BaseModel):
     working_days_per_month: Optional[int] = None
     avatar_url: Optional[str] = None
     permissions: Optional[List[str]] = None
+    crm_access: Optional[bool] = None
 
 
 class ProfileUpdate(BaseModel):
@@ -209,3 +211,65 @@ class CompanySettings(BaseModel):
         ]
     )
     priorities: List[str] = Field(default_factory=lambda: ["Low", "Medium", "Urgent"])
+
+
+# ---------- CRM: Leads / Inquiries ----------
+LEAD_STAGES = ["New", "Contacted", "Qualified", "Proposal", "Negotiation", "Onboarded", "Lost"]
+
+
+class LeadActivity(BaseModel):
+    id: str = Field(default_factory=uid)
+    kind: str = "note"       # note, call, meeting, task, email
+    description: str
+    due_date: Optional[str] = None
+    done: bool = False
+    created_by_id: str
+    created_by_name: str = ""
+    created_at: str = Field(default_factory=now_iso)
+
+
+class LeadCreate(BaseModel):
+    name: str
+    company: str = ""
+    email: str = ""
+    phone: str = ""
+    source: str = "Website"          # Website, Referral, Cold Call, Ad, Other
+    stage: str = "New"
+    next_step: str = ""
+    follow_up_date: Optional[str] = None
+    assigned_to_id: Optional[str] = None
+    notes: str = ""
+    value_estimate: float = 0.0
+    services: List[str] = Field(default_factory=list)
+
+
+class LeadUpdate(BaseModel):
+    name: Optional[str] = None
+    company: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    source: Optional[str] = None
+    stage: Optional[str] = None
+    next_step: Optional[str] = None
+    follow_up_date: Optional[str] = None
+    assigned_to_id: Optional[str] = None
+    notes: Optional[str] = None
+    value_estimate: Optional[float] = None
+    services: Optional[List[str]] = None
+
+
+class LeadActivityCreate(BaseModel):
+    kind: str = "note"
+    description: str
+    due_date: Optional[str] = None
+    done: bool = False
+
+
+class LeadOnboardRequest(BaseModel):
+    project_name: Optional[str] = None
+    company_name: Optional[str] = None
+    member_ids: List[str] = Field(default_factory=list)
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    description: Optional[str] = None
+
