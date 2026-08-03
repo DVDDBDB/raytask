@@ -570,6 +570,8 @@ function QuickLogDialog({ open, lead, stages, onClose, onSaved }) {
   const NEXT_STEP_OPTIONS = [
     "Send proposal",
     "Schedule discovery call",
+    "Schedule meeting",
+    "Meeting",
     "Send quotation",
     "Follow-up call",
     "Send contract",

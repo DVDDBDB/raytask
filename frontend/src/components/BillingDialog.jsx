@@ -56,7 +56,7 @@ function computeTotals(items) {
 
 export default function BillingDialog({
   open, onOpenChange, kind, initial,
-  leads = [], projects = [], onSaved, onDeleted,
+  leads = [], projects = [], acceptedQuotations = [], onSaved, onDeleted,
 }) {
   const isInvoice = kind === "invoice";
   const [form, setForm] = useState(initial || emptyForm(kind));
@@ -211,6 +211,53 @@ export default function BillingDialog({
         </DialogHeader>
 
         <div className="max-h-[68vh] overflow-y-auto pr-1 space-y-4">
+          {/* Import from accepted quotation (new invoices only) */}
+          {isInvoice && !isEdit && acceptedQuotations.length > 0 && (
+            <div className="rounded-md border border-primary/25 bg-primary/5 p-3 space-y-1.5"
+                 data-testid="import-from-quotation-block">
+              <Label className="text-[11px] uppercase tracking-wider text-primary font-semibold">
+                Import from accepted quotation
+              </Label>
+              <Select onValueChange={(qid) => {
+                const q = acceptedQuotations.find((x) => x.id === qid);
+                if (!q) return;
+                setForm({
+                  ...form,
+                  client_name: q.client_name || form.client_name,
+                  client_company: q.client_company || form.client_company,
+                  client_email: q.client_email || form.client_email,
+                  client_phone: q.client_phone || form.client_phone,
+                  client_address: q.client_address || form.client_address,
+                  items: (q.items || []).map((it) => ({
+                    description: it.description || "",
+                    qty: it.qty || 1,
+                    rate: it.rate || 0,
+                    gst_pct: it.gst_pct || 18,
+                  })),
+                  notes: q.notes || form.notes,
+                  terms: q.terms || form.terms,
+                  lead_id: q.lead_id || form.lead_id,
+                  project_id: q.project_id || form.project_id,
+                });
+                toast.success(`Imported ${q.number} — fields are still editable`);
+              }}>
+                <SelectTrigger data-testid="import-quotation-select">
+                  <SelectValue placeholder="Pick an accepted quotation to auto-fill…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {acceptedQuotations.map((q) => (
+                    <SelectItem key={q.id} value={q.id}>
+                      {q.number} · {q.client_company || q.client_name} · ₹{q.total?.toLocaleString?.("en-IN")}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <div className="text-[11px] text-muted-foreground">
+                Client, line items, notes and terms fill in — everything remains editable below.
+              </div>
+            </div>
+          )}
+
           {/* Attach lead / project */}
           <div className="grid md:grid-cols-2 gap-3">
             <div className="space-y-1.5">
@@ -431,8 +478,16 @@ function PaymentDialog({ open, invoice, onClose, onRecord }) {
   }, [open, invoice]);
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-card rounded-lg shadow-2xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="fixed inset-0 z-[70] bg-black/60 flex items-center justify-center p-4"
+      style={{ pointerEvents: "auto" }}
+      onClick={onClose}
+    >
+      <div
+        className="bg-card rounded-lg shadow-2xl w-full max-w-md"
+        style={{ pointerEvents: "auto" }}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="px-5 py-4 border-b border-border">
           <div className="text-base font-semibold flex items-center gap-2" style={{ fontFamily: "Outfit" }}>
             <Wallet className="w-4 h-4 text-emerald-600" /> Record payment — {invoice?.number}
@@ -479,8 +534,16 @@ function RecurringDayDialog({ open, onClose, onSave }) {
   useEffect(() => { if (open) setDay(1); }, [open]);
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-card rounded-lg shadow-2xl w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="fixed inset-0 z-[70] bg-black/60 flex items-center justify-center p-4"
+      style={{ pointerEvents: "auto" }}
+      onClick={onClose}
+    >
+      <div
+        className="bg-card rounded-lg shadow-2xl w-full max-w-sm"
+        style={{ pointerEvents: "auto" }}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="px-5 py-4 border-b border-border">
           <div className="text-base font-semibold flex items-center gap-2" style={{ fontFamily: "Outfit" }}>
             <Repeat className="w-4 h-4 text-primary" /> Save as recurring

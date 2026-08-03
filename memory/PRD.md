@@ -45,6 +45,10 @@ See `/app/memory/test_credentials.md`.
 - **Excel Exports** — openpyxl reports at `/api/exports/tasks.xlsx`, `/costs.xlsx` (Super Admin/Admin), `/productivity.xlsx`. Export buttons in Tasks, Cost Analytics, Analytics pages.
 - **Recurring Tasks** — `recurrence: {enabled, frequency, next_run_at, last_run_at}` on Task. Background asyncio scheduler ticks every 5 min and clones templates to fresh tasks (daily/weekly/monthly). Toggle + frequency picker inside Create Task dialog; recurring badge on Task detail.
 
+## Implemented — Feb 2026 (v3 patches)
+- **CRM Next-Step dropdown** — added "Schedule meeting" and "Meeting" options in Quick Log dialog
+- **Save-as-recurring popup fix** — added `pointer-events: auto` on custom modals inside Radix Dialog (RecurringDayDialog & PaymentDialog in `BillingDialog.jsx`) to bypass react-remove-scroll's body `pointer-events: none`, which was blocking clicks on the "Create template" and "Save payment" buttons
+
 ## Prioritized backlog (v3)
 - **P0**: Email verification via Resend, mention `@name` auto-suggest, task tagging inside chat with rich preview
 - **P1**: Drag-and-drop task rescheduling on calendar, CSV/PDF exports, weekly/monthly efficiency comparison charts, offline PWA caching

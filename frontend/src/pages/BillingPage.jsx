@@ -68,6 +68,11 @@ export default function BillingPage() {
   const [dialogKind, setDialogKind] = useState("quotation");
   const [recurringDialog, setRecurringDialog] = useState({ open: false, initial: null });
 
+  const acceptedQuotations = useMemo(
+    () => quotations.filter((q) => q.status === "accepted"),
+    [quotations]
+  );
+
   const load = async () => {
     try {
       const [qs, invs, rec, ls, ps] = await Promise.all([
@@ -343,6 +348,7 @@ export default function BillingPage() {
         initial={dialogInitial}
         leads={leads}
         projects={projects}
+        acceptedQuotations={acceptedQuotations}
         onSaved={onSaved}
         onDeleted={onDeleted}
       />

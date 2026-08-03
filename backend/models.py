@@ -211,6 +211,36 @@ class CompanySettings(BaseModel):
         ]
     )
     priorities: List[str] = Field(default_factory=lambda: ["Low", "Medium", "Urgent"])
+    # ---- Billing / branding fields ----
+    tagline: str = ""
+    gst_number: str = ""
+    pan_number: str = ""
+    city: str = ""
+    state: str = ""
+    pincode: str = ""
+    phone: str = ""
+    email: str = ""
+    website: str = ""
+    logo_url: str = ""
+    bank_name: str = ""
+    bank_account_name: str = ""
+    bank_account_number: str = ""
+    bank_ifsc: str = ""
+    bank_branch: str = ""
+    bank_upi: str = ""
+    invoice_footer: str = "Thank you for your business."
+    quotation_footer: str = "Looking forward to working together."
+    default_quotation_terms: str = (
+        "• Prices are exclusive of applicable GST.\n"
+        "• 50% advance to start work, 50% on delivery.\n"
+        "• Quotation valid for 15 days from date of issue.\n"
+        "• Two rounds of revisions included; further changes billed hourly."
+    )
+    default_invoice_terms: str = (
+        "• Payment due within 7 days of invoice date.\n"
+        "• Late payments attract 2% interest per month.\n"
+        "• Kindly share transaction reference upon payment."
+    )
 
 
 # ---------- CRM: Leads / Inquiries ----------
@@ -359,40 +389,6 @@ class InvoiceUpdate(BaseModel):
 # ---------- Company settings + Recurring invoices ----------
 LEAD_TEMPERATURES = ["hot", "warm", "cold"]  # legacy — no longer used
 LEAD_PRIORITIES = ["Urgent", "High", "Medium", "Low"]
-
-
-class CompanySettings(BaseModel):
-    company_name: str = "Raybotix Digital"
-    tagline: str = ""
-    gst_number: str = ""
-    pan_number: str = ""
-    address: str = ""
-    city: str = ""
-    state: str = ""
-    pincode: str = ""
-    phone: str = ""
-    email: str = ""
-    website: str = ""
-    logo_url: str = ""
-    bank_name: str = ""
-    bank_account_name: str = ""
-    bank_account_number: str = ""
-    bank_ifsc: str = ""
-    bank_branch: str = ""
-    bank_upi: str = ""
-    invoice_footer: str = "Thank you for your business."
-    quotation_footer: str = "Looking forward to working together."
-    default_quotation_terms: str = (
-        "• Prices are exclusive of applicable GST.\n"
-        "• 50% advance to start work, 50% on delivery.\n"
-        "• Quotation valid for 15 days from date of issue.\n"
-        "• Two rounds of revisions included; further changes billed hourly."
-    )
-    default_invoice_terms: str = (
-        "• Payment due within 7 days of invoice date.\n"
-        "• Late payments attract 2% interest per month.\n"
-        "• Kindly share transaction reference upon payment."
-    )
 
 
 class PaymentRecord(BaseModel):
