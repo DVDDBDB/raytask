@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import api from "@/lib/api";
 import { toast } from "sonner";
+import ResumeYesterdayModal from "@/components/ResumeYesterdayModal";
 
 const navByRole = {
   team_member: [
@@ -273,6 +274,7 @@ export default function Layout() {
           <Outlet />
         </main>
       </div>
+      <ResumeYesterdayModal />
     </div>
   );
 }

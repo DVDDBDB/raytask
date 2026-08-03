@@ -33,6 +33,27 @@ async def log_activity(actor: dict, action: str, target_type: str, target_id: st
     })
 
 
+async def log_activity_raw(actor_id: str, action: str, target_type: str, target_id: str,
+                           previous=None, new=None, reason: str = "", task_id: str = None):
+    """Activity log entry when only the actor_id is known (e.g. background schedulers)."""
+    actor = await db.users.find_one({"id": actor_id}, {"_id": 0, "password_hash": 0})
+    await db.activity_logs.insert_one({
+        "id": __import__("uuid").uuid4().hex,
+        "action": action,
+        "actor_id": actor_id,
+        "actor_name": f"{(actor or {}).get('first_name', '')} {(actor or {}).get('last_name', '')}".strip() or "System",
+        "actor_designation": (actor or {}).get("designation", ""),
+        "actor_role": (actor or {}).get("role", "system"),
+        "target_type": target_type,
+        "target_id": target_id,
+        "task_id": task_id,
+        "previous_value": previous,
+        "new_value": new,
+        "reason": reason,
+        "created_at": now_iso(),
+    })
+
+
 async def push_notification(user_id: str, kind: str, title: str, body: str,
                             link_type: str = "", link_id: str = ""):
     await db.notifications.insert_one({

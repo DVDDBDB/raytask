@@ -23,6 +23,7 @@ from routes_exports import router as exports_router  # noqa: E402
 from routes_ws import router as ws_router  # noqa: E402
 from seed import seed  # noqa: E402
 import recurring  # noqa: E402
+import autostop  # noqa: E402
 import asyncio  # noqa: E402
 
 app = FastAPI(title="Raybotix Digital API")
@@ -75,6 +76,12 @@ async def on_startup():
         logger.info("Recurring scheduler started")
     except Exception as e:
         logger.exception("Scheduler failed to start: %s", e)
+    # Kick off timer auto-stop scheduler (18:00 IST cutoff)
+    try:
+        autostop.start_scheduler(asyncio.get_event_loop())
+        logger.info("Auto-stop (18:00 IST) scheduler started")
+    except Exception as e:
+        logger.exception("Auto-stop scheduler failed to start: %s", e)
 
 
 @app.on_event("shutdown")

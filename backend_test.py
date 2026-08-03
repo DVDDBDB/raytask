@@ -1,14 +1,16 @@
-#!/usr/bin/env python3
 """
-Backend test for Cost Analytics redesign.
-Tests GET /api/analytics/costs with various range parameters, filters,
-and GET /api/exports/costs.xlsx.
+Backend test for Phase 1: Timer auto-stop at 18:00 IST + /tasks/resumable endpoint
 """
 import requests
-import sys
-from datetime import datetime
+import os
+from datetime import datetime, timezone, timedelta
+from motor.motor_asyncio import AsyncIOMotorClient
+import asyncio
+import uuid
 
-# Backend URL from frontend/.env
+# Read environment variables
+MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017")
+DB_NAME = os.getenv("DB_NAME", "raybotix_digital")
 BASE_URL = "https://ray-task-hub.preview.emergentagent.com/api"
 
 # Test credentials
@@ -17,471 +19,610 @@ SUPER_ADMIN_PASSWORD = "Admin@123"
 TEAM_MEMBER_EMAIL = "priya@raybotix.com"
 TEAM_MEMBER_PASSWORD = "Password@123"
 
+# IST timezone
+IST = timezone(timedelta(hours=5, minutes=30))
+
 # Global variables
-admin_token = None
-team_token = None
+super_admin_token = None
+super_admin_id = None
+team_member_token = None
+team_member_id = None
+test_task_id = None
 test_project_id = None
-test_user_id = None
 
 
-def log(msg):
-    print(f"[TEST] {msg}")
-
-
-def test_1_login_admin():
-    """Test Case 1: Login as super admin."""
-    global admin_token
-    log("Test 1: Login as super admin")
-    resp = requests.post(f"{BASE_URL}/auth/login", json={
-        "email": SUPER_ADMIN_EMAIL,
-        "password": SUPER_ADMIN_PASSWORD
+def login(email, password):
+    """Login and return token and user_id"""
+    response = requests.post(f"{BASE_URL}/auth/login", json={
+        "email": email,
+        "password": password
     })
-    if resp.status_code != 200:
-        log(f"❌ FAIL: Login returned {resp.status_code}")
-        log(f"Response: {resp.text}")
-        return False
-    data = resp.json()
-    admin_token = data.get("token")
-    if not admin_token:
-        log("❌ FAIL: No token in response")
-        return False
-    log(f"✅ PASS: Login successful")
-    return True
+    if response.status_code == 200:
+        data = response.json()
+        return data.get("token"), data.get("user", {}).get("id")
+    else:
+        print(f"❌ Login failed for {email}: {response.status_code} {response.text}")
+        return None, None
 
 
-def test_2_range_today():
-    """Test Case 2: range=today → 200; range_label == "Today"; start & end present; total is a number ≥ 0."""
-    log("Test 2: GET /api/analytics/costs?range=today")
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    resp = requests.get(f"{BASE_URL}/analytics/costs?range=today", headers=headers)
-    if resp.status_code != 200:
-        log(f"❌ FAIL: Returned {resp.status_code}")
-        log(f"Response: {resp.text}")
-        return False
-    data = resp.json()
+async def setup_db():
+    """Setup database connection and get user IDs"""
+    global super_admin_id, team_member_id, test_project_id
+    client = AsyncIOMotorClient(MONGO_URL)
+    db = client[DB_NAME]
     
-    # Check range_label
-    if data.get("range_label") != "Today":
-        log(f"❌ FAIL: Expected range_label='Today', got '{data.get('range_label')}'")
-        return False
+    # Get super admin ID
+    super_admin = await db.users.find_one({"email": SUPER_ADMIN_EMAIL}, {"_id": 0, "id": 1})
+    if super_admin:
+        super_admin_id = super_admin["id"]
     
-    # Check start and end are present
-    if not data.get("start") or not data.get("end"):
-        log(f"❌ FAIL: Missing start or end fields")
-        return False
+    # Get team member ID
+    team_member = await db.users.find_one({"email": TEAM_MEMBER_EMAIL}, {"_id": 0, "id": 1})
+    if team_member:
+        team_member_id = team_member["id"]
     
-    # Check total is a number >= 0
-    total = data.get("total")
-    if not isinstance(total, (int, float)) or total < 0:
-        log(f"❌ FAIL: total should be a number >= 0, got {total}")
-        return False
+    # Get a project ID for creating tasks
+    project = await db.projects.find_one({}, {"_id": 0, "id": 1})
+    if project:
+        test_project_id = project["id"]
     
-    log(f"✅ PASS: range_label='Today', start={data['start'][:10]}, end={data['end'][:10]}, total={total}")
-    return True
+    return db, client
 
 
-def test_3_range_week():
-    """Test Case 3: range=week → 200; range_label == "This week"."""
-    log("Test 3: GET /api/analytics/costs?range=week")
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    resp = requests.get(f"{BASE_URL}/analytics/costs?range=week", headers=headers)
-    if resp.status_code != 200:
-        log(f"❌ FAIL: Returned {resp.status_code}")
-        log(f"Response: {resp.text}")
-        return False
-    data = resp.json()
-    
-    if data.get("range_label") != "This week":
-        log(f"❌ FAIL: Expected range_label='This week', got '{data.get('range_label')}'")
-        return False
-    
-    log(f"✅ PASS: range_label='This week', start={data.get('start', '')[:10]}")
-    return True
-
-
-def test_4_range_month():
-    """Test Case 4: range=month → 200; range_label contains current month name; start ends with "-01T00:00:00+00:00"."""
-    log("Test 4: GET /api/analytics/costs?range=month")
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    resp = requests.get(f"{BASE_URL}/analytics/costs?range=month", headers=headers)
-    if resp.status_code != 200:
-        log(f"❌ FAIL: Returned {resp.status_code}")
-        log(f"Response: {resp.text}")
-        return False
-    data = resp.json()
-    
-    # Check range_label contains a month name (e.g., "July 2026")
-    range_label = data.get("range_label", "")
-    current_month = datetime.now().strftime("%B")  # e.g., "July"
-    if current_month not in range_label:
-        log(f"❌ FAIL: Expected range_label to contain '{current_month}', got '{range_label}'")
-        return False
-    
-    # Check start ends with "-01T00:00:00+00:00"
-    start = data.get("start", "")
-    if not start.endswith("-01T00:00:00+00:00"):
-        log(f"❌ FAIL: Expected start to end with '-01T00:00:00+00:00', got '{start}'")
-        return False
-    
-    log(f"✅ PASS: range_label='{range_label}', start={start[:10]}")
-    return True
-
-
-def test_5_range_quarter():
-    """Test Case 5: range=quarter → 200; range_label starts with "Q"."""
-    log("Test 5: GET /api/analytics/costs?range=quarter")
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    resp = requests.get(f"{BASE_URL}/analytics/costs?range=quarter", headers=headers)
-    if resp.status_code != 200:
-        log(f"❌ FAIL: Returned {resp.status_code}")
-        log(f"Response: {resp.text}")
-        return False
-    data = resp.json()
-    
-    range_label = data.get("range_label", "")
-    if not range_label.startswith("Q"):
-        log(f"❌ FAIL: Expected range_label to start with 'Q', got '{range_label}'")
-        return False
-    
-    log(f"✅ PASS: range_label='{range_label}'")
-    return True
-
-
-def test_6_range_year():
-    """Test Case 6: range=year → 200; range_label like "Year 2026"; start ends with "-01-01T00:00:00+00:00"."""
-    log("Test 6: GET /api/analytics/costs?range=year")
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    resp = requests.get(f"{BASE_URL}/analytics/costs?range=year", headers=headers)
-    if resp.status_code != 200:
-        log(f"❌ FAIL: Returned {resp.status_code}")
-        log(f"Response: {resp.text}")
-        return False
-    data = resp.json()
-    
-    range_label = data.get("range_label", "")
-    current_year = str(datetime.now().year)
-    if not range_label.startswith("Year") or current_year not in range_label:
-        log(f"❌ FAIL: Expected range_label like 'Year {current_year}', got '{range_label}'")
-        return False
-    
-    start = data.get("start", "")
-    if not start.endswith("-01-01T00:00:00+00:00"):
-        log(f"❌ FAIL: Expected start to end with '-01-01T00:00:00+00:00', got '{start}'")
-        return False
-    
-    log(f"✅ PASS: range_label='{range_label}', start={start[:10]}")
-    return True
-
-
-def test_7_range_custom():
-    """Test Case 7: range=custom&start=2026-07-01&end=2026-07-31 → 200; range_label "2026-07-01 → 2026-07-31"; end ISO ends with "T23:59:59+00:00"."""
-    log("Test 7: GET /api/analytics/costs?range=custom&start=2026-07-01&end=2026-07-31")
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    resp = requests.get(f"{BASE_URL}/analytics/costs?range=custom&start=2026-07-01&end=2026-07-31", headers=headers)
-    if resp.status_code != 200:
-        log(f"❌ FAIL: Returned {resp.status_code}")
-        log(f"Response: {resp.text}")
-        return False
-    data = resp.json()
-    
-    range_label = data.get("range_label", "")
-    if range_label != "2026-07-01 → 2026-07-31":
-        log(f"❌ FAIL: Expected range_label='2026-07-01 → 2026-07-31', got '{range_label}'")
-        return False
-    
-    end = data.get("end", "")
-    if not end.endswith("T23:59:59+00:00"):
-        log(f"❌ FAIL: Expected end to end with 'T23:59:59+00:00', got '{end}'")
-        return False
-    
-    log(f"✅ PASS: range_label='{range_label}', end={end}")
-    return True
-
-
-def test_8_project_filter():
-    """Test Case 8: Pick any project from GET /api/projects → call /analytics/costs?range=month&project_id=<id>. Verify filtering."""
-    global test_project_id
-    log("Test 8: GET /api/analytics/costs with project_id filter")
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    
-    # Get projects
-    resp = requests.get(f"{BASE_URL}/projects", headers=headers)
-    if resp.status_code != 200:
-        log(f"❌ FAIL: GET /api/projects returned {resp.status_code}")
-        return False
-    projects = resp.json()
-    if not projects:
-        log("⚠️  SKIP: No projects found")
-        return True
-    
-    test_project_id = projects[0]["id"]
-    project_name = projects[0].get("name", "Unknown")
-    
-    # Get unfiltered total
-    resp_unfiltered = requests.get(f"{BASE_URL}/analytics/costs?range=month", headers=headers)
-    if resp_unfiltered.status_code != 200:
-        log(f"❌ FAIL: Unfiltered request returned {resp_unfiltered.status_code}")
-        return False
-    unfiltered_total = resp_unfiltered.json().get("total", 0)
-    
-    # Get filtered by project
-    resp = requests.get(f"{BASE_URL}/analytics/costs?range=month&project_id={test_project_id}", headers=headers)
-    if resp.status_code != 200:
-        log(f"❌ FAIL: Returned {resp.status_code}")
-        log(f"Response: {resp.text}")
-        return False
-    data = resp.json()
-    
-    # Verify all tasks belong to this project
-    tasks = data.get("tasks", [])
-    for task in tasks:
-        if task.get("project_id") != test_project_id:
-            log(f"❌ FAIL: Task {task.get('task_id')} has project_id={task.get('project_id')}, expected {test_project_id}")
-            return False
-    
-    # Verify projects list contains only this project (if any)
-    projects_list = data.get("projects", [])
-    for proj in projects_list:
-        if proj.get("project_id") != test_project_id:
-            log(f"❌ FAIL: Projects list contains project_id={proj.get('project_id')}, expected only {test_project_id}")
-            return False
-    
-    # Verify total <= unfiltered total
-    filtered_total = data.get("total", 0)
-    if filtered_total > unfiltered_total:
-        log(f"❌ FAIL: Filtered total ({filtered_total}) > unfiltered total ({unfiltered_total})")
-        return False
-    
-    log(f"✅ PASS: Project filter works (project='{project_name}', filtered_total={filtered_total} <= unfiltered={unfiltered_total})")
-    return True
-
-
-def test_9_user_filter():
-    """Test Case 9: Pick any user from GET /api/users → call /analytics/costs?range=month&user_id=<id>. Verify filtering."""
-    global test_user_id
-    log("Test 9: GET /api/analytics/costs with user_id filter")
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    
-    # Get users
-    resp = requests.get(f"{BASE_URL}/users", headers=headers)
-    if resp.status_code != 200:
-        log(f"❌ FAIL: GET /api/users returned {resp.status_code}")
-        return False
-    users = resp.json()
-    active_users = [u for u in users if u.get("status") == "active"]
-    if not active_users:
-        log("⚠️  SKIP: No active users found")
-        return True
-    
-    test_user_id = active_users[0]["id"]
-    user_name = active_users[0].get("first_name", "Unknown")
-    
-    # Get unfiltered total
-    resp_unfiltered = requests.get(f"{BASE_URL}/analytics/costs?range=month", headers=headers)
-    if resp_unfiltered.status_code != 200:
-        log(f"❌ FAIL: Unfiltered request returned {resp_unfiltered.status_code}")
-        return False
-    unfiltered_total = resp_unfiltered.json().get("total", 0)
-    
-    # Get filtered by user
-    resp = requests.get(f"{BASE_URL}/analytics/costs?range=month&user_id={test_user_id}", headers=headers)
-    if resp.status_code != 200:
-        log(f"❌ FAIL: Returned {resp.status_code}")
-        log(f"Response: {resp.text}")
-        return False
-    data = resp.json()
-    
-    # Verify employees list contains at most this user
-    employees = data.get("employees", [])
-    for emp in employees:
-        if emp.get("user_id") != test_user_id:
-            log(f"❌ FAIL: Employees list contains user_id={emp.get('user_id')}, expected only {test_user_id}")
-            return False
-    
-    # Verify total <= unfiltered total
-    filtered_total = data.get("total", 0)
-    if filtered_total > unfiltered_total:
-        log(f"❌ FAIL: Filtered total ({filtered_total}) > unfiltered total ({unfiltered_total})")
-        return False
-    
-    log(f"✅ PASS: User filter works (user='{user_name}', filtered_total={filtered_total} <= unfiltered={unfiltered_total})")
-    return True
-
-
-def test_10_response_shape():
-    """Test Case 10: Verify response shape for /analytics/costs?range=month."""
-    log("Test 10: Verify response shape")
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    resp = requests.get(f"{BASE_URL}/analytics/costs?range=month", headers=headers)
-    if resp.status_code != 200:
-        log(f"❌ FAIL: Returned {resp.status_code}")
-        return False
-    data = resp.json()
-    
-    # Check employees fields
-    employees = data.get("employees", [])
-    if employees:
-        emp = employees[0]
-        required_emp_fields = ["user_id", "first_name", "designation", "hourly", "cost", "seconds", "hours", "monthly_cost", "monthly_hours"]
-        for field in required_emp_fields:
-            if field not in emp:
-                log(f"❌ FAIL: Employee missing field '{field}'")
-                return False
-    
-    # Check tasks fields
-    tasks = data.get("tasks", [])
-    if tasks:
-        task = tasks[0]
-        required_task_fields = ["task_id", "title", "project_name", "assignee_name", "cost", "hours"]
-        for field in required_task_fields:
-            if field not in task:
-                log(f"❌ FAIL: Task missing field '{field}'")
-                return False
-    
-    # Check projects fields
-    projects = data.get("projects", [])
-    if projects:
-        proj = projects[0]
-        required_proj_fields = ["project_id", "name", "company_name", "cost", "seconds", "hours"]
-        for field in required_proj_fields:
-            if field not in proj:
-                log(f"❌ FAIL: Project missing field '{field}'")
-                return False
-    
-    log(f"✅ PASS: Response shape verified (employees: {len(employees)}, tasks: {len(tasks)}, projects: {len(projects)})")
-    return True
-
-
-def test_11_rbac():
-    """Test Case 11: RBAC: login as priya@raybotix.com → GET /api/analytics/costs must return 403."""
-    global team_token
-    log("Test 11: RBAC test with team member")
-    
-    # Login as team member
-    resp = requests.post(f"{BASE_URL}/auth/login", json={
-        "email": TEAM_MEMBER_EMAIL,
-        "password": TEAM_MEMBER_PASSWORD
+async def cleanup_auto_paused_sessions(db, user_id):
+    """Remove all auto-paused sessions for a user"""
+    result = await db.timer_sessions.delete_many({
+        "user_id": user_id,
+        "auto_paused": True
     })
-    if resp.status_code != 200:
-        log(f"❌ FAIL: Team member login returned {resp.status_code}")
-        return False
-    team_token = resp.json().get("token")
-    
-    # Try to access costs endpoint
-    headers = {"Authorization": f"Bearer {team_token}"}
-    resp = requests.get(f"{BASE_URL}/analytics/costs", headers=headers)
-    if resp.status_code != 403:
-        log(f"❌ FAIL: Expected 403, got {resp.status_code}")
-        log(f"Response: {resp.text}")
-        return False
-    
-    log(f"✅ PASS: Team member correctly denied access (403)")
-    return True
+    print(f"🧹 Cleaned up {result.deleted_count} auto-paused sessions for user {user_id}")
 
 
-def test_12_excel_export():
-    """Test Case 12: GET /api/exports/costs.xlsx?range=month → 200; Content-Type must be xlsx; body length > 100 bytes."""
-    log("Test 12: GET /api/exports/costs.xlsx")
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    resp = requests.get(f"{BASE_URL}/exports/costs.xlsx?range=month", headers=headers)
-    if resp.status_code != 200:
-        log(f"❌ FAIL: Returned {resp.status_code}")
-        log(f"Response: {resp.text}")
-        return False
-    
-    # Check Content-Type
-    content_type = resp.headers.get("Content-Type", "")
-    expected_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    if content_type != expected_type:
-        log(f"❌ FAIL: Expected Content-Type='{expected_type}', got '{content_type}'")
-        return False
-    
-    # Check body length
-    body_length = len(resp.content)
-    if body_length <= 100:
-        log(f"❌ FAIL: Body length {body_length} <= 100 bytes")
-        return False
-    
-    log(f"✅ PASS: Excel export works (Content-Type correct, body length={body_length} bytes)")
-    return True
+async def cleanup_all_open_sessions(db, user_id):
+    """Close all open sessions for a user"""
+    result = await db.timer_sessions.update_many(
+        {"user_id": user_id, "ended_at": None},
+        {"$set": {"ended_at": datetime.now(timezone.utc).isoformat(), "duration_seconds": 0}}
+    )
+    print(f"🧹 Closed {result.modified_count} open sessions for user {user_id}")
 
 
-def test_13_regression():
-    """Test Case 13: Regression: GET /api/analytics/dashboard → 200. GET /api/analytics/productivity → 200. GET /api/tasks?scope=all → 200."""
-    log("Test 13: Regression tests")
-    headers = {"Authorization": f"Bearer {admin_token}"}
+async def inject_yesterday_session(db, user_id, task_id):
+    """Inject a synthetic yesterday auto-paused session"""
+    now_ist = datetime.now(timezone.utc).astimezone(IST)
+    yday_18_ist = datetime(now_ist.year, now_ist.month, now_ist.day, 18, 0, tzinfo=IST) - timedelta(days=1)
+    yday_09_ist = yday_18_ist.replace(hour=9)
+    ended_utc = yday_18_ist.astimezone(timezone.utc).isoformat()
+    started_utc = yday_09_ist.astimezone(timezone.utc).isoformat()
     
-    # Test dashboard
-    resp = requests.get(f"{BASE_URL}/analytics/dashboard", headers=headers)
-    if resp.status_code != 200:
-        log(f"❌ FAIL: GET /api/analytics/dashboard returned {resp.status_code}")
-        log(f"Response: {resp.text}")
-        return False
+    session_id = uuid.uuid4().hex
+    session_doc = {
+        "id": session_id,
+        "task_id": task_id,
+        "user_id": user_id,
+        "user_first_name": "Test",
+        "user_designation": "Developer",
+        "started_at": started_utc,
+        "ended_at": ended_utc,
+        "duration_seconds": 32400,  # 9 hours
+        "auto_paused": True,
+        "auto_paused_at": ended_utc,
+        "paused": False,
+    }
+    await db.timer_sessions.insert_one(session_doc)
     
-    # Test productivity
-    resp = requests.get(f"{BASE_URL}/analytics/productivity", headers=headers)
-    if resp.status_code != 200:
-        log(f"❌ FAIL: GET /api/analytics/productivity returned {resp.status_code}")
-        log(f"Response: {resp.text}")
-        return False
+    # Update task to have auto_paused_at and status="Paused"
+    await db.tasks.update_one(
+        {"id": task_id},
+        {"$set": {
+            "auto_paused_at": ended_utc,
+            "status": "Paused"
+        }}
+    )
     
-    # Test tasks
-    resp = requests.get(f"{BASE_URL}/tasks?scope=all", headers=headers)
-    if resp.status_code != 200:
-        log(f"❌ FAIL: GET /api/tasks?scope=all returned {resp.status_code}")
-        log(f"Response: {resp.text}")
-        return False
-    
-    log(f"✅ PASS: All regression tests passed (dashboard, productivity, tasks)")
-    return True
+    print(f"✅ Injected yesterday auto-paused session for task {task_id}")
+    return session_id
 
 
-def main():
-    log("=" * 80)
-    log("Backend Test: Cost Analytics Redesign Verification")
-    log("=" * 80)
+async def inject_two_days_ago_session(db, user_id, task_id):
+    """Inject a synthetic two-days-ago auto-paused session"""
+    now_ist = datetime.now(timezone.utc).astimezone(IST)
+    two_days_ago_18_ist = datetime(now_ist.year, now_ist.month, now_ist.day, 18, 0, tzinfo=IST) - timedelta(days=2)
+    two_days_ago_09_ist = two_days_ago_18_ist.replace(hour=9)
+    ended_utc = two_days_ago_18_ist.astimezone(timezone.utc).isoformat()
+    started_utc = two_days_ago_09_ist.astimezone(timezone.utc).isoformat()
     
-    tests = [
-        ("Login as super admin", test_1_login_admin),
-        ("range=today", test_2_range_today),
-        ("range=week", test_3_range_week),
-        ("range=month", test_4_range_month),
-        ("range=quarter", test_5_range_quarter),
-        ("range=year", test_6_range_year),
-        ("range=custom with dates", test_7_range_custom),
-        ("project_id filter", test_8_project_filter),
-        ("user_id filter", test_9_user_filter),
-        ("Response shape verification", test_10_response_shape),
-        ("RBAC (team member 403)", test_11_rbac),
-        ("Excel export", test_12_excel_export),
-        ("Regression tests", test_13_regression),
+    session_id = uuid.uuid4().hex
+    session_doc = {
+        "id": session_id,
+        "task_id": task_id,
+        "user_id": user_id,
+        "user_first_name": "Test",
+        "user_designation": "Developer",
+        "started_at": started_utc,
+        "ended_at": ended_utc,
+        "duration_seconds": 32400,
+        "auto_paused": True,
+        "auto_paused_at": ended_utc,
+        "paused": False,
+    }
+    await db.timer_sessions.insert_one(session_doc)
+    print(f"✅ Injected two-days-ago auto-paused session for task {task_id}")
+    return session_id
+
+
+async def inject_today_open_session(db, user_id, task_id):
+    """Inject a fresh OPEN session for today 09:00 IST"""
+    now_ist = datetime.now(timezone.utc).astimezone(IST)
+    today_09_ist = datetime(now_ist.year, now_ist.month, now_ist.day, 9, 0, tzinfo=IST)
+    started_utc = today_09_ist.astimezone(timezone.utc).isoformat()
+    
+    session_id = uuid.uuid4().hex
+    session_doc = {
+        "id": session_id,
+        "task_id": task_id,
+        "user_id": user_id,
+        "user_first_name": "Test",
+        "user_designation": "Developer",
+        "started_at": started_utc,
+        "ended_at": None,
+        "duration_seconds": 0,
+        "auto_paused": False,
+        "paused": False,
+    }
+    await db.timer_sessions.insert_one(session_doc)
+    
+    # Update task to In Progress
+    await db.tasks.update_one(
+        {"id": task_id},
+        {"$set": {"status": "In Progress"}}
+    )
+    
+    print(f"✅ Injected today open session for task {task_id}")
+    return session_id
+
+
+def create_task(token, title, assignee_id):
+    """Create a task and return task_id"""
+    response = requests.post(
+        f"{BASE_URL}/tasks",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "title": title,
+            "description": "Test task for auto-pause",
+            "project_id": test_project_id,
+            "assignee_id": assignee_id,
+            "priority": "Medium",
+            "status": "Assigned",
+            "estimated_minutes": 60
+        }
+    )
+    if response.status_code == 200:
+        task = response.json()
+        print(f"✅ Created task: {task['id']} - {title}")
+        return task["id"]
+    else:
+        print(f"❌ Failed to create task: {response.status_code} {response.text}")
+        return None
+
+
+def test_resumable_endpoint(token, test_name, expected_status=200):
+    """Test GET /api/tasks/resumable"""
+    response = requests.get(
+        f"{BASE_URL}/tasks/resumable",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    print(f"\n{'='*80}")
+    print(f"TEST: {test_name}")
+    print(f"Status: {response.status_code}")
+    if response.status_code == expected_status:
+        if response.status_code == 200:
+            data = response.json()
+            print(f"Response: {len(data)} tasks")
+            for task in data:
+                print(f"  - Task ID: {task.get('id')}")
+                print(f"    Title: {task.get('title')}")
+                print(f"    Project: {task.get('project_name')}")
+                print(f"    Priority: {task.get('priority')}")
+                print(f"    Status: {task.get('status')}")
+                print(f"    Auto-paused at: {task.get('auto_paused_at')}")
+                print(f"    Yesterday seconds: {task.get('yesterday_seconds')}")
+            return True, data
+        else:
+            print(f"Response: {response.text}")
+            return True, None
+    else:
+        print(f"❌ Expected {expected_status}, got {response.status_code}")
+        print(f"Response: {response.text}")
+        return False, None
+
+
+def test_resume_task(token, task_id):
+    """Test POST /api/tasks/{id}/resume"""
+    response = requests.post(
+        f"{BASE_URL}/tasks/{task_id}/resume",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    print(f"\nResuming task {task_id}: {response.status_code}")
+    if response.status_code == 200:
+        print("✅ Task resumed successfully")
+        return True
+    else:
+        print(f"❌ Failed to resume: {response.text}")
+        return False
+
+
+def test_pause_task(token, task_id):
+    """Test POST /api/tasks/{id}/pause"""
+    response = requests.post(
+        f"{BASE_URL}/tasks/{task_id}/pause",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    print(f"\nPausing task {task_id}: {response.status_code}")
+    if response.status_code == 200:
+        print("✅ Task paused successfully")
+        return True
+    else:
+        print(f"❌ Failed to pause: {response.text}")
+        return False
+
+
+def test_complete_task(token, task_id):
+    """Test POST /api/tasks/{id}/complete"""
+    response = requests.post(
+        f"{BASE_URL}/tasks/{task_id}/complete",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    print(f"\nCompleting task {task_id}: {response.status_code}")
+    if response.status_code == 200:
+        print("✅ Task completed successfully")
+        return True
+    else:
+        print(f"❌ Failed to complete: {response.text}")
+        return False
+
+
+def get_task(token, task_id):
+    """Get task details"""
+    response = requests.get(
+        f"{BASE_URL}/tasks/{task_id}",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    if response.status_code == 200:
+        return response.json()
+    else:
+        print(f"❌ Failed to get task: {response.status_code} {response.text}")
+        return None
+
+
+def test_regression_endpoints(token):
+    """Test regression endpoints"""
+    print(f"\n{'='*80}")
+    print("REGRESSION TESTS")
+    
+    endpoints = [
+        "/analytics/dashboard",
+        "/analytics/costs?range=month",
+        "/tasks?scope=all"
     ]
     
-    passed = 0
-    failed = 0
+    all_passed = True
+    for endpoint in endpoints:
+        response = requests.get(
+            f"{BASE_URL}{endpoint}",
+            headers={"Authorization": f"Bearer {token}"}
+        )
+        if response.status_code == 200:
+            print(f"✅ GET {endpoint} - 200")
+        else:
+            print(f"❌ GET {endpoint} - {response.status_code}")
+            all_passed = False
     
-    for name, test_func in tests:
-        try:
-            if test_func():
-                passed += 1
-            else:
-                failed += 1
-        except Exception as e:
-            log(f"❌ EXCEPTION in {name}: {e}")
-            import traceback
-            traceback.print_exc()
-            failed += 1
+    return all_passed
+
+
+async def test_autostop_tick(db):
+    """Test autostop._tick() function directly"""
+    print(f"\n{'='*80}")
+    print("TEST: Autostop unit test - _tick() function")
     
-    log("=" * 80)
-    log(f"RESULTS: {passed} passed, {failed} failed out of {len(tests)} tests")
-    log("=" * 80)
+    # Set environment variables before importing autostop
+    os.environ['MONGO_URL'] = MONGO_URL
+    os.environ['DB_NAME'] = DB_NAME
     
-    if failed > 0:
-        sys.exit(1)
+    # Import autostop module
+    import sys
+    sys.path.insert(0, '/app/backend')
+    import autostop
+    
+    # Check current IST time
+    now_ist = datetime.now(timezone.utc).astimezone(IST)
+    print(f"Current IST time: {now_ist.strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    # Create a test task for this
+    task_id = uuid.uuid4().hex
+    task_doc = {
+        "id": task_id,
+        "title": "Autostop tick test task",
+        "description": "Test",
+        "project_id": test_project_id,
+        "assignee_id": super_admin_id,
+        "creator_id": super_admin_id,
+        "priority": "Medium",
+        "status": "In Progress",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "completed_at": None,
+        "workflow": [],
+        "reassignment_history": [],
+    }
+    await db.tasks.insert_one(task_doc)
+    
+    # Inject today open session starting at 09:00 IST
+    session_id = await inject_today_open_session(db, super_admin_id, task_id)
+    
+    # Call _tick()
+    print("Calling autostop._tick()...")
+    paused_count = await autostop._tick()
+    print(f"Auto-paused {paused_count} sessions")
+    
+    # Check if session was updated
+    session = await db.timer_sessions.find_one({"id": session_id}, {"_id": 0})
+    task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
+    
+    result = False
+    if now_ist.hour >= 18:
+        # After 18:00 IST, session should be auto-paused
+        if session.get("ended_at") and session.get("auto_paused"):
+            print("✅ Session was auto-paused (after 18:00 IST)")
+            print(f"   ended_at: {session.get('ended_at')}")
+            print(f"   duration_seconds: {session.get('duration_seconds')}")
+            print(f"   auto_paused: {session.get('auto_paused')}")
+            print(f"   Task status: {task.get('status')}")
+            print(f"   Task auto_paused_at: {task.get('auto_paused_at')}")
+            result = True
+        else:
+            print("❌ Session was NOT auto-paused (expected after 18:00 IST)")
+            result = False
     else:
-        log("🎉 All tests passed!")
-        sys.exit(0)
+        # Before 18:00 IST, session should NOT be auto-paused
+        if not session.get("ended_at"):
+            print("✅ Session was NOT auto-paused (before 18:00 IST - correct)")
+            print(f"   Current IST hour: {now_ist.hour}")
+            result = True
+        else:
+            print("❌ Session was auto-paused (unexpected before 18:00 IST)")
+            result = False
+    
+    # Clean up: close the open session if it's still open
+    if not session.get("ended_at"):
+        await db.timer_sessions.update_one(
+            {"id": session_id},
+            {"$set": {"ended_at": datetime.now(timezone.utc).isoformat(), "duration_seconds": 100}}
+        )
+        print("🧹 Cleaned up open session from autostop test")
+    
+    return result
+
+
+async def main():
+    """Main test runner"""
+    global super_admin_token, team_member_token, test_task_id
+    
+    print("="*80)
+    print("PHASE 1 BACKEND TESTS: Timer auto-stop at 18:00 IST + /tasks/resumable")
+    print("="*80)
+    
+    # Setup database
+    db, client = await setup_db()
+    
+    # Login
+    print("\n1. Logging in...")
+    super_admin_token, _ = login(SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD)
+    team_member_token, _ = login(TEAM_MEMBER_EMAIL, TEAM_MEMBER_PASSWORD)
+    
+    if not super_admin_token:
+        print("❌ Failed to login as super admin")
+        return
+    
+    print(f"✅ Logged in as super admin")
+    print(f"✅ Super admin ID: {super_admin_id}")
+    
+    # Test 2: GET /api/tasks/resumable BEFORE injection
+    await cleanup_auto_paused_sessions(db, super_admin_id)
+    await cleanup_all_open_sessions(db, super_admin_id)
+    success, data = test_resumable_endpoint(super_admin_token, "Test 2: GET /resumable BEFORE injection (should be empty)")
+    if success and len(data) == 0:
+        print("✅ Test 2 PASSED")
+    else:
+        print("❌ Test 2 FAILED")
+    
+    # Create a test task
+    test_task_id = create_task(super_admin_token, "Auto-pause test task", super_admin_id)
+    if not test_task_id:
+        print("❌ Failed to create test task")
+        return
+    
+    # Test 3: Inject synthetic yesterday auto-paused session
+    print(f"\n{'='*80}")
+    print("TEST 3: Inject yesterday auto-paused session")
+    session_id = await inject_yesterday_session(db, super_admin_id, test_task_id)
+    
+    # Test 4: GET /api/tasks/resumable AFTER injection
+    success, data = test_resumable_endpoint(super_admin_token, "Test 4: GET /resumable AFTER injection")
+    if success and len(data) > 0:
+        task = data[0]
+        required_keys = ["id", "title", "project_name", "priority", "status", "auto_paused_at", "yesterday_seconds"]
+        has_all_keys = all(key in task for key in required_keys)
+        if has_all_keys and task.get("yesterday_seconds", 0) > 0:
+            print("✅ Test 4 PASSED - Response includes task with all required keys")
+        else:
+            print("❌ Test 4 FAILED - Missing keys or yesterday_seconds <= 0")
+    else:
+        print("❌ Test 4 FAILED")
+    
+    # Test 5: POST /api/tasks/{id}/resume
+    print(f"\n{'='*80}")
+    print("TEST 5: Resume task")
+    if test_resume_task(super_admin_token, test_task_id):
+        # Check that task no longer appears in resumable
+        success, data = test_resumable_endpoint(super_admin_token, "Test 5b: GET /resumable after resume (should be empty)")
+        if success and len(data) == 0:
+            print("✅ Test 5 PASSED - Task no longer in resumable list")
+            
+            # Check that auto_paused_at is removed
+            task = get_task(super_admin_token, test_task_id)
+            if task and "auto_paused_at" not in task:
+                print("✅ Test 5c PASSED - auto_paused_at removed from task")
+            else:
+                print("❌ Test 5c FAILED - auto_paused_at still present")
+        else:
+            print("❌ Test 5 FAILED")
+    else:
+        print("❌ Test 5 FAILED")
+    
+    # Test 6: POST /api/tasks/{id}/pause
+    print(f"\n{'='*80}")
+    print("TEST 6: Pause task (auto_paused_at should NOT reappear)")
+    if test_pause_task(super_admin_token, test_task_id):
+        task = get_task(super_admin_token, test_task_id)
+        if task:
+            if task.get("status") == "Paused" and "auto_paused_at" not in task:
+                print("✅ Test 6 PASSED - Task paused, auto_paused_at NOT present")
+            else:
+                print(f"❌ Test 6 FAILED - status={task.get('status')}, auto_paused_at present: {'auto_paused_at' in task}")
+        else:
+            print("❌ Test 6 FAILED - Could not get task")
+    else:
+        print("❌ Test 6 FAILED")
+    
+    # Test 7: Inject two-days-ago session
+    print(f"\n{'='*80}")
+    print("TEST 7: Inject two-days-ago auto-paused session")
+    test_task_id_2 = create_task(super_admin_token, "Two days ago test task", super_admin_id)
+    if test_task_id_2:
+        await inject_two_days_ago_session(db, super_admin_id, test_task_id_2)
+        success, data = test_resumable_endpoint(super_admin_token, "Test 7: GET /resumable (should NOT include two-days-ago)")
+        # Should not include the two-days-ago task
+        task_ids = [t["id"] for t in data]
+        if test_task_id_2 not in task_ids:
+            print("✅ Test 7 PASSED - Two-days-ago task NOT in resumable list")
+        else:
+            print("❌ Test 7 FAILED - Two-days-ago task in resumable list")
+    else:
+        print("❌ Test 7 FAILED - Could not create task")
+    
+    # Test 8: Complete an auto-paused task
+    print(f"\n{'='*80}")
+    print("TEST 8: Complete an auto-paused task")
+    test_task_id_3 = create_task(super_admin_token, "Complete test task", super_admin_id)
+    if test_task_id_3:
+        await inject_yesterday_session(db, super_admin_id, test_task_id_3)
+        # Resume first
+        test_resume_task(super_admin_token, test_task_id_3)
+        # Complete
+        if test_complete_task(super_admin_token, test_task_id_3):
+            success, data = test_resumable_endpoint(super_admin_token, "Test 8: GET /resumable (should NOT include completed)")
+            task_ids = [t["id"] for t in data]
+            if test_task_id_3 not in task_ids:
+                print("✅ Test 8 PASSED - Completed task NOT in resumable list")
+            else:
+                print("❌ Test 8 FAILED - Completed task in resumable list")
+        else:
+            print("❌ Test 8 FAILED - Could not complete task")
+    else:
+        print("❌ Test 8 FAILED - Could not create task")
+    
+    # Test 9: RBAC - team member
+    print(f"\n{'='*80}")
+    print("TEST 9: RBAC - Team member (Priya)")
+    if team_member_token:
+        # Clean up any auto-paused sessions for Priya
+        await cleanup_auto_paused_sessions(db, team_member_id)
+        success, data = test_resumable_endpoint(team_member_token, "Test 9: GET /resumable as team member")
+        if success and len(data) == 0:
+            print("✅ Test 9 PASSED - Team member gets empty list (no auto-paused sessions)")
+        else:
+            print("❌ Test 9 FAILED")
+    else:
+        print("⚠️  Test 9 SKIPPED - Could not login as team member")
+    
+    # Test 10: Autostop unit test
+    await test_autostop_tick(db)
+    
+    # Test 11: Regression - existing timer endpoints
+    print(f"\n{'='*80}")
+    print("TEST 11: Regression - Timer endpoints")
+    test_task_id_4 = create_task(super_admin_token, "Regression test task", super_admin_id)
+    if test_task_id_4:
+        # Test start
+        response = requests.post(
+            f"{BASE_URL}/tasks/{test_task_id_4}/start",
+            headers={"Authorization": f"Bearer {super_admin_token}"}
+        )
+        if response.status_code == 200:
+            print("✅ POST /start - 200")
+        else:
+            print(f"❌ POST /start - {response.status_code}: {response.text}")
+        
+        # Test pause
+        response = requests.post(
+            f"{BASE_URL}/tasks/{test_task_id_4}/pause",
+            headers={"Authorization": f"Bearer {super_admin_token}"}
+        )
+        if response.status_code == 200:
+            print("✅ POST /pause - 200")
+        else:
+            print(f"❌ POST /pause - {response.status_code}: {response.text}")
+        
+        # Test resume
+        response = requests.post(
+            f"{BASE_URL}/tasks/{test_task_id_4}/resume",
+            headers={"Authorization": f"Bearer {super_admin_token}"}
+        )
+        if response.status_code == 200:
+            print("✅ POST /resume - 200")
+        else:
+            print(f"❌ POST /resume - {response.status_code}: {response.text}")
+        
+        # Test complete
+        response = requests.post(
+            f"{BASE_URL}/tasks/{test_task_id_4}/complete",
+            headers={"Authorization": f"Bearer {super_admin_token}"}
+        )
+        if response.status_code == 200:
+            print("✅ POST /complete - 200")
+        else:
+            print(f"❌ POST /complete - {response.status_code}: {response.text}")
+        
+        # Test 403 for non-assignee (create a new task for this)
+        test_task_id_5 = create_task(super_admin_token, "Non-assignee test task", super_admin_id)
+        if team_member_token and test_task_id_5:
+            response = requests.post(
+                f"{BASE_URL}/tasks/{test_task_id_5}/start",
+                headers={"Authorization": f"Bearer {team_member_token}"}
+            )
+            if response.status_code == 403:
+                print("✅ POST /start as non-assignee - 403")
+            else:
+                print(f"❌ POST /start as non-assignee - {response.status_code} (expected 403)")
+    else:
+        print("❌ Test 11 FAILED - Could not create task")
+    
+    # Test 12: Regression - analytics endpoints
+    test_regression_endpoints(super_admin_token)
+    
+    # Cleanup
+    print(f"\n{'='*80}")
+    print("CLEANUP")
+    await cleanup_auto_paused_sessions(db, super_admin_id)
+    await cleanup_auto_paused_sessions(db, team_member_id)
+    
+    client.close()
+    print("\n" + "="*80)
+    print("ALL TESTS COMPLETED")
+    print("="*80)
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

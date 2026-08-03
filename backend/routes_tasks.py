@@ -4,7 +4,7 @@ from models import TaskCreate, TaskUpdate, HandoffRequest, ReopenRequest, Review
 from auth import get_current_user, require_roles, can_see_costs
 from db import db
 from utils import now_iso, log_activity, push_notification
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import uuid
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
@@ -167,6 +167,67 @@ async def create_task(payload: TaskCreate, user=Depends(get_current_user)):
     doc.pop("_id", None)
     return doc
 
+@router.get("/resumable")
+async def resumable_tasks(user=Depends(get_current_user)):
+    """
+    Returns tasks whose timer was auto-paused **yesterday** (IST calendar day)
+    for the currently logged-in user. Used by the "Resume yesterday?" popup on
+    login. Excludes tasks the user has already resumed (i.e. has a newer session).
+    """
+    IST = timezone(timedelta(hours=5, minutes=30))
+    now_ist = datetime.now(timezone.utc).astimezone(IST)
+    today_start_ist = datetime(now_ist.year, now_ist.month, now_ist.day, tzinfo=IST)
+    yesterday_start_ist = today_start_ist - timedelta(days=1)
+    y_start_utc = yesterday_start_ist.astimezone(timezone.utc).isoformat()
+    y_end_utc = today_start_ist.astimezone(timezone.utc).isoformat()
+
+    sessions = await db.timer_sessions.find({
+        "user_id": user["id"],
+        "auto_paused": True,
+        "auto_paused_at": {"$gte": y_start_utc, "$lt": y_end_utc},
+    }, {"_id": 0}).to_list(500)
+
+    if not sessions:
+        return []
+
+    task_ids = list({s["task_id"] for s in sessions})
+    # Skip tasks that already have a NEWER open session (means user resumed)
+    new_open = await db.timer_sessions.find({
+        "user_id": user["id"],
+        "task_id": {"$in": task_ids},
+        "ended_at": None,
+    }, {"_id": 0, "task_id": 1}).to_list(500)
+    already_open = {s["task_id"] for s in new_open}
+
+    tasks = await db.tasks.find({
+        "id": {"$in": task_ids},
+        "status": {"$nin": ["Completed", "Cancelled"]},
+    }, {"_id": 0}).to_list(500)
+
+    # Sum time spent yesterday per task
+    time_by_task = {}
+    for s in sessions:
+        time_by_task[s["task_id"]] = time_by_task.get(s["task_id"], 0) + (s.get("duration_seconds", 0) or 0)
+
+    projects = {p["id"]: p for p in await db.projects.find({}, {"_id": 0}).to_list(500)}
+    result = []
+    for t in tasks:
+        if t["id"] in already_open:
+            continue
+        p = projects.get(t.get("project_id"))
+        result.append({
+            "id": t["id"],
+            "title": t.get("title", ""),
+            "project_name": (p or {}).get("name", ""),
+            "priority": t.get("priority", "Medium"),
+            "status": t.get("status", ""),
+            "auto_paused_at": t.get("auto_paused_at"),
+            "yesterday_seconds": time_by_task.get(t["id"], 0),
+        })
+    return result
+
+
+
 
 @router.get("/{task_id}")
 async def get_task(task_id: str, user=Depends(get_current_user)):
@@ -264,7 +325,8 @@ async def start_task(task_id: str, user=Depends(get_current_user)):
             "paused": False,
         }
         await db.timer_sessions.insert_one(session_doc)
-    await db.tasks.update_one({"id": task_id}, {"$set": {"status": "In Progress", "updated_at": now_iso()}})
+    await db.tasks.update_one({"id": task_id}, {"$set": {"status": "In Progress", "updated_at": now_iso()},
+                                                 "$unset": {"auto_paused_at": ""}})
     await log_activity(user, "task_started", "task", task_id, task_id=task_id)
     return {"ok": True}
 
