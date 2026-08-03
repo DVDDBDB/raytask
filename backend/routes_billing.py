@@ -4,7 +4,7 @@ from db import db
 from auth import require_crm_access
 from models import (
     QuotationCreate, QuotationUpdate, InvoiceCreate, InvoiceUpdate,
-    QUOTATION_STATUSES, INVOICE_STATUSES, LineItem,
+    QUOTATION_STATUSES, INVOICE_STATUSES, LineItem, PaymentRecord, PaymentRecordRequest,
 )
 from utils import now_iso, log_activity, push_notification
 from datetime import datetime, timezone
@@ -164,6 +164,17 @@ async def _visibility_query(user: dict) -> dict:
     return {"$or": ors}
 
 
+async def _apply_default_terms(data: dict, kind: str):
+    """Fill `terms` from company_settings when the user left it empty."""
+    if data.get("terms"):
+        return
+    settings = await db.company_settings.find_one({"_id": "company"}, {"_id": 0})
+    if not settings:
+        return
+    key = "default_quotation_terms" if kind == "quotation" else "default_invoice_terms"
+    data["terms"] = settings.get(key, "") or ""
+
+
 # ================================================================
 # Quotations
 # ================================================================
@@ -199,6 +210,7 @@ async def quotation_statuses(user=Depends(require_crm_access)):
 async def create_quotation(payload: QuotationCreate, user=Depends(require_crm_access)):
     data = payload.model_dump()
     await _resolve_client_defaults(data)
+    await _apply_default_terms(data, "quotation")
     subtotal, gst_amount, total = _totals(data["items"])
     doc = {
         "id": uuid.uuid4().hex,
@@ -356,6 +368,7 @@ async def get_invoice(iid: str, user=Depends(require_crm_access)):
 async def create_invoice(payload: InvoiceCreate, user=Depends(require_crm_access)):
     data = payload.model_dump()
     await _resolve_client_defaults(data)
+    await _apply_default_terms(data, "invoice")
     subtotal, gst_amount, total = _totals(data["items"])
     doc = {
         "id": uuid.uuid4().hex,
@@ -479,6 +492,8 @@ async def mark_paid(iid: str, user=Depends(require_crm_access)):
     doc = await db.invoices.find_one({"id": iid})
     if not doc:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    if not await _user_can_view(doc, user):
+        raise HTTPException(status_code=403, detail="Not allowed")
     await db.invoices.update_one(
         {"id": iid},
         {"$set": {"status": "paid", "paid_at": now_iso(), "updated_at": now_iso()}},
@@ -487,6 +502,91 @@ async def mark_paid(iid: str, user=Depends(require_crm_access)):
     await log_activity(user, "invoice_paid", "invoice", iid,
                        new={"number": fresh["number"], "total": fresh["total"]})
     return fresh
+
+
+@invoices.post("/{iid}/record-payment")
+async def record_payment(iid: str, payload: PaymentRecordRequest, user=Depends(require_crm_access)):
+    """Record a payment against an invoice (mode + date + reference + amount).
+    Appends to invoice.payments[] and marks it paid when cumulative amount >= total."""
+    doc = await db.invoices.find_one({"id": iid})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    if not await _user_can_view(doc, user):
+        raise HTTPException(status_code=403, detail="Not allowed")
+    record = PaymentRecord(
+        amount=float(payload.amount or 0),
+        mode=payload.mode, received_on=payload.received_on,
+        reference=payload.reference, notes=payload.notes,
+        recorded_by_id=user["id"],
+        recorded_by_name=user.get("first_name", ""),
+    ).model_dump()
+    prev = doc.get("payments", []) or []
+    total_paid = sum(float(p.get("amount") or 0) for p in prev) + record["amount"]
+    fields = {
+        "payments": prev + [record],
+        "amount_paid": round(total_paid, 2),
+        "updated_at": now_iso(),
+    }
+    if total_paid + 0.01 >= float(doc.get("total") or 0) > 0:
+        fields["status"] = "paid"
+        fields["paid_at"] = now_iso()
+    await db.invoices.update_one({"id": iid}, {"$set": fields})
+    fresh = await db.invoices.find_one({"id": iid}, {"_id": 0})
+    await log_activity(user, "invoice_payment_recorded", "invoice", iid,
+                       new={"amount": record["amount"], "mode": record["mode"],
+                            "received_on": record["received_on"]})
+    return fresh
+
+
+@invoices.post("/{iid}/to-recurring")
+async def invoice_to_recurring(iid: str, body: dict, user=Depends(require_crm_access)):
+    """Convert an existing invoice into a monthly recurring template."""
+    from routes_billing_extras import _next_run
+    doc = await db.invoices.find_one({"id": iid}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    if not await _user_can_view(doc, user):
+        raise HTTPException(status_code=403, detail="Not allowed")
+    day = int(body.get("day_of_month") or 1)
+    day = max(1, min(28, day))
+    items = []
+    for it in doc.get("items", []) or []:
+        items.append({
+            "id": uuid.uuid4().hex,
+            "description": it.get("description", ""),
+            "qty": it.get("qty", 1),
+            "rate": it.get("rate", 0),
+            "gst_pct": it.get("gst_pct", 18),
+            "line_total": it.get("line_total", 0),
+            "line_gst": it.get("line_gst", 0),
+        })
+    tpl = {
+        "id": uuid.uuid4().hex,
+        "created_by_id": user["id"],
+        "created_by_name": user.get("first_name", ""),
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+        "last_run_at": None,
+        "next_run_date": _next_run(day).isoformat(),
+        "project_id": doc.get("project_id"),
+        "lead_id": doc.get("lead_id"),
+        "client_name": doc.get("client_name", ""),
+        "client_company": doc.get("client_company", ""),
+        "client_email": doc.get("client_email", ""),
+        "client_phone": doc.get("client_phone", ""),
+        "client_address": doc.get("client_address", ""),
+        "items": items,
+        "notes": doc.get("notes", ""),
+        "terms": doc.get("terms", ""),
+        "day_of_month": day,
+        "active": True,
+        "currency": doc.get("currency", "INR"),
+    }
+    await db.recurring_invoices.insert_one(tpl)
+    tpl.pop("_id", None)
+    await log_activity(user, "invoice_to_recurring", "invoice", iid,
+                       new={"template_id": tpl["id"], "day_of_month": day})
+    return {"ok": True, "template": tpl}
 
 
 @invoices.post("/{iid}/mark-status")

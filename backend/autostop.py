@@ -83,11 +83,54 @@ async def _autopause_session(session: dict, cutoff_utc: datetime):
 async def _tick():
     now_utc = datetime.now(timezone.utc)
     cutoff_utc = _ist_cutoff_today_utc(now_utc)
+
+    # 1) 30-minute-extension expiries — pause any session whose extension_ends_at <= now.
+    ext_now = now_utc.isoformat()
+    ext_open = await db.timer_sessions.find(
+        {"ended_at": None, "extension_ends_at": {"$ne": None, "$lte": ext_now}},
+        {"_id": 0},
+    ).to_list(1000)
+    for s in ext_open:
+        try:
+            started = _iso_to_dt(s["started_at"])
+            if not started:
+                continue
+            duration = (s.get("duration_seconds", 0) or 0) + int((now_utc - started).total_seconds())
+            await db.timer_sessions.update_one(
+                {"id": s["id"]},
+                {"$set": {"ended_at": now_utc.isoformat(),
+                          "duration_seconds": duration,
+                          "auto_paused": True,
+                          "auto_paused_at": now_utc.isoformat(),
+                          "paused_reason": "extension_expired"}},
+            )
+            await db.tasks.update_one(
+                {"id": s["task_id"]},
+                {"$set": {"status": "Paused", "updated_at": now_iso(),
+                          "auto_paused_at": now_utc.isoformat()}},
+            )
+            task = await db.tasks.find_one({"id": s["task_id"]}, {"_id": 0, "title": 1})
+            if task:
+                await push_notification(
+                    s["user_id"], "task_still_working",
+                    "Still working? Tap to restart the timer",
+                    f"{task.get('title', 'Task')} — auto-paused after 30 minutes",
+                    link_type="task", link_id=s["task_id"],
+                )
+            await log_activity_raw(
+                s["user_id"], "task_extension_expired", "task",
+                s["task_id"], task_id=s["task_id"], new={"reason": "30m extension"},
+            )
+        except Exception as e:
+            logger.exception("extension expiry failed: %s", e)
+
     if now_utc < cutoff_utc:
-        return 0  # cutoff hasn't happened yet in IST
-    # Find open sessions started before today's cutoff.
+        return len(ext_open)
+
+    # 2) 18:00 IST cutoff — pause sessions that started before it.
     open_sessions = await db.timer_sessions.find(
-        {"ended_at": None, "started_at": {"$lt": cutoff_utc.isoformat()}},
+        {"ended_at": None, "started_at": {"$lt": cutoff_utc.isoformat()},
+         "$or": [{"extension_ends_at": None}, {"extension_ends_at": {"$exists": False}}]},
         {"_id": 0},
     ).to_list(5000)
     paused = 0
@@ -95,11 +138,20 @@ async def _tick():
         try:
             if await _autopause_session(s, cutoff_utc):
                 paused += 1
+                # Nag notification: still working?
+                task = await db.tasks.find_one({"id": s["task_id"]}, {"_id": 0, "title": 1})
+                if task:
+                    await push_notification(
+                        s["user_id"], "task_still_working",
+                        "Timer stopped at 6 PM IST — still working?",
+                        f"{task.get('title', 'Task')} — tap to restart if you're continuing.",
+                        link_type="task", link_id=s["task_id"],
+                    )
         except Exception as e:
             logger.exception("auto-pause failed for session %s: %s", s.get("id"), e)
     if paused:
         logger.info("Auto-paused %d timer sessions at 18:00 IST", paused)
-    return paused
+    return paused + len(ext_open)
 
 
 async def loop(interval_seconds: int = 60):

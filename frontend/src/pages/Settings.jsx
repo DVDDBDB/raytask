@@ -150,6 +150,18 @@ export default function Settings() {
               <Input value={company.quotation_footer || ""} onChange={(e) => setC("quotation_footer", e.target.value)} /></div>
             <div className="space-y-1.5"><Label>Invoice footer</Label>
               <Input value={company.invoice_footer || ""} onChange={(e) => setC("invoice_footer", e.target.value)} /></div>
+            <div className="space-y-1.5 md:col-span-2"><Label>Default terms & conditions — Quotation</Label>
+              <textarea rows={4}
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                value={company.default_quotation_terms || ""}
+                onChange={(e) => setC("default_quotation_terms", e.target.value)}
+                data-testid="default-quotation-terms" /></div>
+            <div className="space-y-1.5 md:col-span-2"><Label>Default terms & conditions — Invoice</Label>
+              <textarea rows={4}
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                value={company.default_invoice_terms || ""}
+                onChange={(e) => setC("default_invoice_terms", e.target.value)}
+                data-testid="default-invoice-terms" /></div>
           </div>
         </div>
       )}

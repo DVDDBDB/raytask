@@ -301,18 +301,38 @@ async def start_task(task_id: str, user=Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Task not found")
     if task.get("assignee_id") != user["id"]:
         raise HTTPException(status_code=403, detail="Only the assignee can start this task")
-    # Check settings for allow_multiple_active_timers
-    settings = await db.settings.find_one({"id": "company"}) or {}
-    if not settings.get("allow_multiple_active_timers", False):
-        active = await db.timer_sessions.find_one({"user_id": user["id"], "ended_at": None})
-        if active and active.get("task_id") != task_id:
-            raise HTTPException(
-                status_code=400,
-                detail="You already have an active task. Pause or complete the current task before starting another task.",
-            )
-    # if session already active for this task, ignore
+
+    # Auto-pause any OTHER open sessions for this user — enforces "one active task per user".
+    other_open = await db.timer_sessions.find(
+        {"user_id": user["id"], "ended_at": None, "task_id": {"$ne": task_id}},
+        {"_id": 0},
+    ).to_list(50)
+    for sess in other_open:
+        started = _iso_to_dt(sess["started_at"])
+        duration = (sess.get("duration_seconds", 0) or 0) + (
+            int((datetime.now(timezone.utc) - started).total_seconds()) if started else 0
+        )
+        await db.timer_sessions.update_one(
+            {"id": sess["id"]},
+            {"$set": {"ended_at": now_iso(), "duration_seconds": duration,
+                      "paused_reason": "auto_switch"}},
+        )
+        await db.tasks.update_one(
+            {"id": sess["task_id"]},
+            {"$set": {"status": "Paused", "updated_at": now_iso()}},
+        )
+
+    # If session already active for this task, don't duplicate
     existing = await db.timer_sessions.find_one({"task_id": task_id, "user_id": user["id"], "ended_at": None})
     if not existing:
+        # If we're starting after 18:00 IST, add a 30-min soft cap so autostop can nag again.
+        IST = timezone(timedelta(hours=5, minutes=30))
+        now_ist = datetime.now(timezone.utc).astimezone(IST)
+        cutoff_ist = now_ist.replace(hour=18, minute=0, second=0, microsecond=0)
+        extension_ends_at = None
+        if now_ist >= cutoff_ist:
+            extension_ends_at = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
+
         session_doc = {
             "id": uuid.uuid4().hex,
             "task_id": task_id,
@@ -323,6 +343,7 @@ async def start_task(task_id: str, user=Depends(get_current_user)):
             "ended_at": None,
             "duration_seconds": 0,
             "paused": False,
+            "extension_ends_at": extension_ends_at,
         }
         await db.timer_sessions.insert_one(session_doc)
     await db.tasks.update_one({"id": task_id}, {"$set": {"status": "In Progress", "updated_at": now_iso()},

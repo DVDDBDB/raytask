@@ -10,7 +10,7 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { Plus, Trash2, Save, Send, IndianRupee, CheckCircle2, XCircle, Building2, Download } from "lucide-react";
+import { Plus, Trash2, Save, Send, IndianRupee, CheckCircle2, XCircle, Building2, Download, ArrowRightLeft, Repeat, Wallet } from "lucide-react";
 import { formatINR } from "@/lib/format";
 import { toast } from "sonner";
 import api from "@/lib/api";
@@ -61,6 +61,8 @@ export default function BillingDialog({
   const isInvoice = kind === "invoice";
   const [form, setForm] = useState(initial || emptyForm(kind));
   const [busy, setBusy] = useState(false);
+  const [paymentOpen, setPaymentOpen] = useState(false);
+  const [recurringOpen, setRecurringOpen] = useState(false);
   const isEdit = !!initial?.id;
 
   useEffect(() => {
@@ -144,6 +146,37 @@ export default function BillingDialog({
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Failed");
     } finally { setBusy(false); }
+  };
+
+  const convertToInvoice = async () => {
+    if (!isEdit || isInvoice) return;
+    try {
+      const r = await api.post(`/invoices/from-quotation/${initial.id}`);
+      toast.success(`Invoice ${r.data.number} created`);
+      onOpenChange(false);
+      onSaved(r.data);
+    } catch (e) { toast.error(e?.response?.data?.detail || "Failed"); }
+  };
+
+  const convertToRecurring = async (day) => {
+    if (!isEdit || !isInvoice) return;
+    try {
+      const r = await api.post(`/invoices/${initial.id}/to-recurring`, { day_of_month: day });
+      toast.success(`Recurring template created (day ${day} each month)`);
+      setRecurringOpen(false);
+      onSaved({ ...initial });
+    } catch (e) { toast.error(e?.response?.data?.detail || "Failed"); }
+  };
+
+  const recordPayment = async ({ amount, mode, received_on, reference, notes }) => {
+    try {
+      const r = await api.post(`/invoices/${initial.id}/record-payment`, {
+        amount: parseFloat(amount || 0), mode, received_on, reference, notes,
+      });
+      toast.success("Payment recorded");
+      setPaymentOpen(false);
+      onSaved(r.data);
+    } catch (e) { toast.error(e?.response?.data?.detail || "Failed"); }
   };
 
   const del = async () => {
@@ -322,6 +355,21 @@ export default function BillingDialog({
               <Send className="w-4 h-4" /> {isInvoice ? "Send invoice" : "Send quotation"}
             </Button>
           )}
+          {isEdit && !isInvoice && (form.status === "sent" || form.status === "accepted") && (
+            <Button variant="outline" onClick={convertToInvoice} className="gap-1.5" data-testid="convert-invoice-inline">
+              <ArrowRightLeft className="w-4 h-4" /> Convert to invoice
+            </Button>
+          )}
+          {isEdit && isInvoice && (
+            <Button variant="outline" onClick={() => setRecurringOpen(true)} className="gap-1.5" data-testid="to-recurring-button">
+              <Repeat className="w-4 h-4" /> Save as recurring
+            </Button>
+          )}
+          {isEdit && isInvoice && form.status !== "paid" && (
+            <Button variant="outline" onClick={() => setPaymentOpen(true)} className="gap-1.5 text-emerald-600" data-testid="record-payment-button">
+              <Wallet className="w-4 h-4" /> Record payment
+            </Button>
+          )}
           {isEdit && !isInvoice && form.status === "sent" && (
             <>
               <Button variant="outline" onClick={() => setStatus("accepted")} className="gap-1.5 mr-auto text-emerald-600" data-testid="bill-accept-button">
@@ -348,7 +396,105 @@ export default function BillingDialog({
           </Button>
         </DialogFooter>
       </DialogContent>
+
+      <PaymentDialog
+        open={paymentOpen}
+        invoice={initial}
+        onClose={() => setPaymentOpen(false)}
+        onRecord={recordPayment}
+      />
+      <RecurringDayDialog
+        open={recurringOpen}
+        onClose={() => setRecurringOpen(false)}
+        onSave={convertToRecurring}
+      />
     </Dialog>
+  );
+}
+
+function PaymentDialog({ open, invoice, onClose, onRecord }) {
+  const [amount, setAmount] = useState("");
+  const [mode, setMode] = useState("UPI");
+  const [receivedOn, setReceivedOn] = useState(new Date().toISOString().slice(0, 10));
+  const [reference, setReference] = useState("");
+  const [notes, setNotes] = useState("");
+  useEffect(() => {
+    if (open) {
+      const outstanding = Math.max(0, (invoice?.total || 0) - (invoice?.amount_paid || 0));
+      setAmount(outstanding);
+      setMode("UPI");
+      setReceivedOn(new Date().toISOString().slice(0, 10));
+      setReference(""); setNotes("");
+    }
+  }, [open, invoice]);
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-card rounded-lg shadow-2xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b border-border">
+          <div className="text-base font-semibold flex items-center gap-2" style={{ fontFamily: "Outfit" }}>
+            <Wallet className="w-4 h-4 text-emerald-600" /> Record payment — {invoice?.number}
+          </div>
+          <div className="text-[11px] text-muted-foreground">
+            Invoice total ₹{invoice?.total?.toLocaleString?.("en-IN")} · Paid ₹{(invoice?.amount_paid || 0).toLocaleString?.("en-IN")}
+          </div>
+        </div>
+        <div className="px-5 py-4 space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1"><Label className="text-[11px]">Amount ₹</Label>
+              <Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} data-testid="pay-amount" /></div>
+            <div className="space-y-1"><Label className="text-[11px]">Mode</Label>
+              <Select value={mode} onValueChange={setMode}>
+                <SelectTrigger data-testid="pay-mode"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {["UPI","NEFT","RTGS","Cash","Cheque","Card","Other"].map((m) => (
+                    <SelectItem key={m} value={m}>{m}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1"><Label className="text-[11px]">Received on</Label>
+              <Input type="date" value={receivedOn} onChange={(e) => setReceivedOn(e.target.value)} data-testid="pay-date" /></div>
+            <div className="space-y-1"><Label className="text-[11px]">Reference / UTR</Label>
+              <Input value={reference} onChange={(e) => setReference(e.target.value)} /></div>
+          </div>
+          <div className="space-y-1"><Label className="text-[11px]">Notes</Label>
+            <Textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional" /></div>
+        </div>
+        <div className="px-5 py-3 border-t border-border flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={() => onRecord({ amount, mode, received_on: receivedOn, reference, notes })} data-testid="pay-save">
+            Save payment
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RecurringDayDialog({ open, onClose, onSave }) {
+  const [day, setDay] = useState(1);
+  useEffect(() => { if (open) setDay(1); }, [open]);
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-card rounded-lg shadow-2xl w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b border-border">
+          <div className="text-base font-semibold flex items-center gap-2" style={{ fontFamily: "Outfit" }}>
+            <Repeat className="w-4 h-4 text-primary" /> Save as recurring
+          </div>
+          <div className="text-[11px] text-muted-foreground">A Draft invoice will be created on this day each month.</div>
+        </div>
+        <div className="px-5 py-4 space-y-2">
+          <Label className="text-[11px]">Day of month (1–28)</Label>
+          <Input type="number" min="1" max="28" value={day} onChange={(e) => setDay(parseInt(e.target.value || "1", 10))} />
+        </div>
+        <div className="px-5 py-3 border-t border-border flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={() => onSave(day)} data-testid="recurring-day-save">Create template</Button>
+        </div>
+      </div>
+    </div>
   );
 }
 

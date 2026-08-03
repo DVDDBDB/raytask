@@ -5,7 +5,7 @@ from db import db
 from auth import get_current_user, require_crm_access, has_crm_access
 from models import (
     LeadCreate, LeadUpdate, LeadActivityCreate, LeadActivity,
-    LeadOnboardRequest, LEAD_STAGES, LEAD_TEMPERATURES,
+    LeadOnboardRequest, LEAD_STAGES, LEAD_PRIORITIES,
 )
 from utils import now_iso, log_activity, push_notification
 import uuid
@@ -120,8 +120,8 @@ async def update_lead(lead_id: str, payload: LeadUpdate, user=Depends(require_cr
     update = {k: v for k, v in payload.model_dump(exclude_none=True).items()}
     if "stage" in update and update["stage"] not in LEAD_STAGES:
         raise HTTPException(status_code=400, detail=f"Invalid stage. Allowed: {LEAD_STAGES}")
-    if "temperature" in update and update["temperature"] not in LEAD_TEMPERATURES:
-        raise HTTPException(status_code=400, detail=f"Invalid temperature. Allowed: {LEAD_TEMPERATURES}")
+    if "priority" in update and update["priority"] not in LEAD_PRIORITIES:
+        raise HTTPException(status_code=400, detail=f"Invalid priority. Allowed: {LEAD_PRIORITIES}")
 
     prev_stage = lead.get("stage")
     prev_assignee = lead.get("assigned_to_id")

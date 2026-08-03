@@ -233,9 +233,9 @@ class LeadCreate(BaseModel):
     company: str = ""
     email: str = ""
     phone: str = ""
-    source: str = "Website"          # Website, Referral, Cold Call, Ad, Other
+    source: str = "Website"
     stage: str = "New"
-    temperature: str = "warm"        # hot | warm | cold
+    priority: str = "Medium"           # Urgent | High | Medium | Low
     next_step: str = ""
     follow_up_date: Optional[str] = None
     assigned_to_id: Optional[str] = None
@@ -251,7 +251,7 @@ class LeadUpdate(BaseModel):
     phone: Optional[str] = None
     source: Optional[str] = None
     stage: Optional[str] = None
-    temperature: Optional[str] = None
+    priority: Optional[str] = None
     next_step: Optional[str] = None
     follow_up_date: Optional[str] = None
     assigned_to_id: Optional[str] = None
@@ -357,7 +357,8 @@ class InvoiceUpdate(BaseModel):
 
 
 # ---------- Company settings + Recurring invoices ----------
-LEAD_TEMPERATURES = ["hot", "warm", "cold"]
+LEAD_TEMPERATURES = ["hot", "warm", "cold"]  # legacy — no longer used
+LEAD_PRIORITIES = ["Urgent", "High", "Medium", "Low"]
 
 
 class CompanySettings(BaseModel):
@@ -381,6 +382,37 @@ class CompanySettings(BaseModel):
     bank_upi: str = ""
     invoice_footer: str = "Thank you for your business."
     quotation_footer: str = "Looking forward to working together."
+    default_quotation_terms: str = (
+        "• Prices are exclusive of applicable GST.\n"
+        "• 50% advance to start work, 50% on delivery.\n"
+        "• Quotation valid for 15 days from date of issue.\n"
+        "• Two rounds of revisions included; further changes billed hourly."
+    )
+    default_invoice_terms: str = (
+        "• Payment due within 7 days of invoice date.\n"
+        "• Late payments attract 2% interest per month.\n"
+        "• Kindly share transaction reference upon payment."
+    )
+
+
+class PaymentRecord(BaseModel):
+    id: str = Field(default_factory=uid)
+    amount: float
+    mode: str = "UPI"                # Cash | UPI | NEFT | RTGS | Cheque | Card | Other
+    received_on: str                  # YYYY-MM-DD (or ISO)
+    reference: str = ""
+    notes: str = ""
+    recorded_by_id: str = ""
+    recorded_by_name: str = ""
+    created_at: str = Field(default_factory=now_iso)
+
+
+class PaymentRecordRequest(BaseModel):
+    amount: float
+    mode: str = "UPI"
+    received_on: str
+    reference: str = ""
+    notes: str = ""
 
 
 class RecurringInvoiceCreate(BaseModel):

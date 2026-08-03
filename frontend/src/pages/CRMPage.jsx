@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { formatINR } from "@/lib/format";
 import {
   Plus, Search, Phone, Mail, Building2, CalendarClock, User as UserIcon,
-  Rocket, Trash2, Save, Filter, X, StickyNote, FileText, Flame, Snowflake, Sun,
+  Rocket, Trash2, Save, Filter, X, StickyNote, FileText, AlertTriangle, ArrowUpDown, MessageSquarePlus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,18 +30,18 @@ const STAGE_COLORS = {
 };
 
 const SOURCES = ["Website", "Referral", "Cold Call", "Ad", "Instagram", "LinkedIn", "Other"];
-const TEMPERATURES = [
-  { key: "hot", label: "Hot", icon: Flame, cls: "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/30" },
-  { key: "warm", label: "Warm", icon: Sun, cls: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30" },
-  { key: "cold", label: "Cold", icon: Snowflake, cls: "bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/30" },
+const PRIORITIES = [
+  { key: "Urgent", cls: "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/30" },
+  { key: "High", cls: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30" },
+  { key: "Medium", cls: "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30" },
+  { key: "Low", cls: "bg-slate-500/10 text-slate-600 dark:text-slate-300 border-slate-500/30" },
 ];
 
-function TempChip({ value }) {
-  const t = TEMPERATURES.find((x) => x.key === value) || TEMPERATURES[1];
-  const Icon = t.icon;
+function PriorityChip({ value }) {
+  const p = PRIORITIES.find((x) => x.key === value) || PRIORITIES[2];
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${t.cls}`}>
-      <Icon className="w-3 h-3" /> {t.label}
+    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${p.cls}`}>
+      {p.key}
     </span>
   );
 }
@@ -53,7 +53,7 @@ const emptyLead = {
   phone: "",
   source: "Website",
   stage: "New",
-  temperature: "warm",
+  priority: "Medium",
   next_step: "",
   follow_up_date: "",
   assigned_to_id: "",
@@ -61,53 +61,61 @@ const emptyLead = {
   value_estimate: 0,
 };
 
-function LeadCard({ lead, onOpen }) {
+function LeadCard({ lead, onOpen, onQuickLog }) {
+  const overdue = lead.is_due;
   return (
-    <button
-      onClick={() => onOpen(lead)}
+    <div
       data-testid={`lead-card-${lead.id}`}
-      className="w-full text-left card-flat p-3 hover:shadow-md transition group"
+      className={`w-full text-left card-flat p-3 hover:shadow-md transition group ${overdue ? "border-l-4 border-l-red-500" : ""}`}
     >
       <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="font-semibold truncate">{lead.name}</div>
+        <button onClick={() => onOpen(lead)} className="text-left flex-1 min-w-0" data-testid={`lead-open-${lead.id}`}>
+          <div className="font-semibold truncate flex items-center gap-1.5">
+            {lead.name}
+          </div>
           {lead.company && (
             <div className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
               <Building2 className="w-3 h-3" /> {lead.company}
             </div>
           )}
-        </div>
-        <div className="flex flex-col items-end gap-1 shrink-0">
-          <TempChip value={lead.temperature || "warm"} />
-          {lead.value_estimate > 0 && (
-            <span className="text-[11px] font-semibold text-primary tabular-nums">
-              {formatINR(lead.value_estimate)}
-            </span>
-          )}
-        </div>
+        </button>
+        <button
+          onClick={(e) => { e.stopPropagation(); onQuickLog(lead); }}
+          data-testid={`lead-quicklog-${lead.id}`}
+          title="Log activity / update follow-up"
+          className="shrink-0 rounded-full p-1.5 hover:bg-primary/10 text-primary opacity-0 group-hover:opacity-100 transition"
+        >
+          <MessageSquarePlus className="w-3.5 h-3.5" />
+        </button>
+      </div>
+      <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+        <PriorityChip value={lead.priority || "Medium"} />
+        {overdue && (
+          <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-600 dark:text-red-400">
+            <AlertTriangle className="w-3 h-3" /> Overdue
+          </span>
+        )}
+        {lead.value_estimate > 0 && (
+          <span className="text-[11px] font-semibold text-primary tabular-nums ml-auto">
+            {formatINR(lead.value_estimate)}
+          </span>
+        )}
       </div>
       {lead.next_step && (
-        <div className="text-[11px] text-muted-foreground mt-2 line-clamp-2">
-          → {lead.next_step}
-        </div>
+        <div className="text-[11px] text-muted-foreground mt-2 line-clamp-2">→ {lead.next_step}</div>
       )}
       <div className="flex items-center justify-between mt-2 text-[11px] text-muted-foreground">
         <span className="flex items-center gap-1">
-          {lead.assigned_to_name && (
-            <>
-              <UserIcon className="w-3 h-3" />
-              {lead.assigned_to_name}
-            </>
-          )}
+          {lead.assigned_to_name && (<><UserIcon className="w-3 h-3" />{lead.assigned_to_name}</>)}
         </span>
         {lead.follow_up_date && (
-          <span className="flex items-center gap-1">
+          <span className={`flex items-center gap-1 ${overdue ? "text-red-600 font-semibold" : ""}`}>
             <CalendarClock className="w-3 h-3" />
             {new Date(lead.follow_up_date).toLocaleDateString()}
           </span>
         )}
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -217,21 +225,20 @@ function LeadDialog({ open, onOpenChange, lead, teamMembers, stages, onSaved, on
             </Select>
           </div>
           <div className="space-y-1.5">
-            <Label>Temperature</Label>
-            <div className="flex gap-2" data-testid="lead-temperature-group">
-              {TEMPERATURES.map((t) => {
-                const Icon = t.icon;
-                const active = form.temperature === t.key;
+            <Label>Priority</Label>
+            <div className="grid grid-cols-4 gap-1.5" data-testid="lead-priority-group">
+              {PRIORITIES.map((p) => {
+                const active = form.priority === p.key;
                 return (
                   <button
-                    key={t.key} type="button"
-                    onClick={() => setForm({ ...form, temperature: t.key })}
-                    data-testid={`temp-${t.key}`}
-                    className={`flex-1 inline-flex items-center justify-center gap-1 rounded-md border px-2 py-2 text-xs font-semibold transition ${
-                      active ? t.cls + " ring-2 ring-primary/40" : "border-border text-muted-foreground hover:bg-secondary/40"
+                    key={p.key} type="button"
+                    onClick={() => setForm({ ...form, priority: p.key })}
+                    data-testid={`priority-${p.key}`}
+                    className={`inline-flex items-center justify-center rounded-md border px-2 py-1.5 text-xs font-semibold transition ${
+                      active ? p.cls + " ring-2 ring-primary/40" : "border-border text-muted-foreground hover:bg-secondary/40"
                     }`}
                   >
-                    <Icon className="w-3.5 h-3.5" /> {t.label}
+                    {p.key}
                   </button>
                 );
               })}
@@ -366,15 +373,15 @@ export default function CRMPage() {
   const [assigneeFilter, setAssigneeFilter] = useState("all");
   const [dialogLead, setDialogLead] = useState(null);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [tempFilter, setTempFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("follow_up");
+  const [quickLog, setQuickLog] = useState({ open: false, lead: null });
 
   const load = async () => {
     setLoading(true);
     try {
-      const params = { include_onboarded: false };
+      const params = { include_onboarded: false, sort: sortBy };
       if (search) params.q = search;
       if (assigneeFilter && assigneeFilter !== "all") params.assigned_to_id = assigneeFilter;
-      if (tempFilter && tempFilter !== "all") params.temperature = tempFilter;
       const [ls, sts, tm] = await Promise.all([
         api.get("/leads", { params }),
         api.get("/leads/stages"),
@@ -384,11 +391,11 @@ export default function CRMPage() {
       setStages(sts.data || stages);
       setTeam(tm.data || []);
     } catch (e) {
-      // silent - keep skeleton
+      // silent
     } finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [assigneeFilter, tempFilter]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [assigneeFilter, sortBy]);
 
   // Debounced search
   useEffect(() => {
@@ -498,17 +505,16 @@ export default function CRMPage() {
               ))}
             </SelectContent>
           </Select>
-          <Select value={tempFilter} onValueChange={setTempFilter}>
-            <SelectTrigger className="w-36" data-testid="lead-temp-filter"><SelectValue /></SelectTrigger>
+          <Select value={sortBy} onValueChange={setSortBy}>
+            <SelectTrigger className="w-44" data-testid="lead-sort"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">Any temp</SelectItem>
-              {TEMPERATURES.map((t) => (
-                <SelectItem key={t.key} value={t.key}>{t.label}</SelectItem>
-              ))}
+              <SelectItem value="follow_up">Follow-up date ↑</SelectItem>
+              <SelectItem value="priority">Priority (High → Low)</SelectItem>
+              <SelectItem value="updated">Recently updated</SelectItem>
             </SelectContent>
           </Select>
-          {(search || assigneeFilter !== "all" || tempFilter !== "all") && (
-            <Button variant="ghost" size="sm" onClick={() => { setSearch(""); setAssigneeFilter("all"); setTempFilter("all"); }}
+          {(search || assigneeFilter !== "all") && (
+            <Button variant="ghost" size="sm" onClick={() => { setSearch(""); setAssigneeFilter("all"); setSortBy("follow_up"); }}
                     className="gap-1"><X className="w-3.5 h-3.5" /> Clear</Button>
           )}
         </div>
@@ -525,7 +531,8 @@ export default function CRMPage() {
               </div>
               <div className="space-y-2 min-h-[60px]">
                 {(byStage[s] || []).map((l) => (
-                  <LeadCard key={l.id} lead={l} onOpen={openEdit} />
+                  <LeadCard key={l.id} lead={l} onOpen={openEdit}
+                            onQuickLog={(lead) => setQuickLog({ open: true, lead })} />
                 ))}
                 {(byStage[s] || []).length === 0 && (
                   <div className="text-[11px] text-muted-foreground italic px-2 py-3">No leads</div>
@@ -547,6 +554,116 @@ export default function CRMPage() {
         onOnboarded={onOnboarded}
         onCreateQuotation={onCreateQuotation}
       />
+
+      <QuickLogDialog
+        open={quickLog.open}
+        lead={quickLog.lead}
+        stages={stages}
+        onClose={() => setQuickLog({ open: false, lead: null })}
+        onSaved={(updated) => { onSaved(updated); setQuickLog({ open: false, lead: null }); }}
+      />
+    </div>
+  );
+}
+
+function QuickLogDialog({ open, lead, stages, onClose, onSaved }) {
+  const [kind, setKind] = React.useState("call");
+  const [description, setDescription] = React.useState("");
+  const [stage, setStage] = React.useState("");
+  const [followUp, setFollowUp] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+
+  React.useEffect(() => {
+    if (open && lead) {
+      setKind("call");
+      setDescription("");
+      setStage(lead.stage || "");
+      setFollowUp(lead.follow_up_date ? lead.follow_up_date.slice(0, 16) : "");
+    }
+  }, [open, lead]);
+
+  if (!open || !lead) return null;
+
+  const save = async () => {
+    if (!description.trim()) { toast.error("Say what happened"); return; }
+    setBusy(true);
+    try {
+      await api.post(`/leads/${lead.id}/activities`, { kind, description, done: false });
+      const patch = {};
+      if (stage && stage !== lead.stage) patch.stage = stage;
+      if (followUp !== (lead.follow_up_date ? lead.follow_up_date.slice(0, 16) : "")) {
+        patch.follow_up_date = followUp || null;
+      }
+      let updated = lead;
+      if (Object.keys(patch).length) {
+        const r = await api.patch(`/leads/${lead.id}`, patch);
+        updated = r.data;
+      } else {
+        const r = await api.get(`/leads/${lead.id}`);
+        updated = r.data;
+      }
+      toast.success("Activity logged");
+      onSaved(updated);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Failed");
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-card rounded-lg shadow-2xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b border-border">
+          <div className="text-base font-semibold flex items-center gap-2" style={{ fontFamily: "Outfit" }}>
+            <MessageSquarePlus className="w-4 h-4 text-primary" /> Log activity — {lead.name}
+          </div>
+          {lead.company && <div className="text-[11px] text-muted-foreground mt-0.5">{lead.company}</div>}
+        </div>
+        <div className="px-5 py-4 space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <Label className="text-[11px]">Activity type</Label>
+              <Select value={kind} onValueChange={setKind}>
+                <SelectTrigger data-testid="quicklog-kind"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="call">Call</SelectItem>
+                  <SelectItem value="meeting">Meeting</SelectItem>
+                  <SelectItem value="email">Email</SelectItem>
+                  <SelectItem value="note">Note</SelectItem>
+                  <SelectItem value="task">Task</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[11px]">Change stage</Label>
+              <Select value={stage} onValueChange={setStage}>
+                <SelectTrigger data-testid="quicklog-stage"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {stages.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-[11px]">What happened?</Label>
+            <Textarea rows={2} value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      data-testid="quicklog-desc"
+                      placeholder="e.g. Client asked for quote by Friday, budget ₹1.5L" />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-[11px]">Next follow-up date</Label>
+            <Input type="datetime-local" value={followUp}
+                   onChange={(e) => setFollowUp(e.target.value)}
+                   data-testid="quicklog-followup" />
+          </div>
+        </div>
+        <div className="px-5 py-3 border-t border-border flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={save} disabled={busy} data-testid="quicklog-save">
+            {busy ? "Saving…" : "Log activity"}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
