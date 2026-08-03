@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { formatINR } from "@/lib/format";
 import {
   Plus, Search, Phone, Mail, Building2, CalendarClock, User as UserIcon,
-  Rocket, Trash2, Save, Filter, X, StickyNote,
+  Rocket, Trash2, Save, Filter, X, StickyNote, FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -92,7 +92,7 @@ function LeadCard({ lead, onOpen }) {
   );
 }
 
-function LeadDialog({ open, onOpenChange, lead, teamMembers, stages, onSaved, onDelete, onOnboarded }) {
+function LeadDialog({ open, onOpenChange, lead, teamMembers, stages, onSaved, onDelete, onOnboarded, onCreateQuotation }) {
   const [form, setForm] = useState(lead || emptyLead);
   const [saving, setSaving] = useState(false);
   const [newActivity, setNewActivity] = useState({ kind: "note", description: "", due_date: "" });
@@ -290,6 +290,11 @@ function LeadDialog({ open, onOpenChange, lead, teamMembers, stages, onSaved, on
           )}
         </div>
         <DialogFooter className="flex-wrap gap-2">
+          {isEdit && (
+            <Button variant="outline" className="gap-1.5" onClick={() => onCreateQuotation(lead)} data-testid="lead-create-quotation">
+              <FileText className="w-4 h-4" /> Create quotation
+            </Button>
+          )}
           {isEdit && lead.stage !== "Onboarded" && (
             <Button variant="outline" className="mr-auto gap-1.5" onClick={doOnboard} data-testid="lead-onboard-button">
               <Rocket className="w-4 h-4" /> Onboard → Create project
@@ -399,6 +404,13 @@ export default function CRMPage() {
     if (payload.project?.id) navigate(`/projects/${payload.project.id}`);
   };
 
+  const onCreateQuotation = (lead) => {
+    // Navigate to Billing page with a `?leadId=` hint (the page can use it later).
+    // For MVP we simply jump to Billing; the user picks the lead in the dialog.
+    setDialogOpen(false);
+    navigate(`/billing?leadId=${lead.id}`);
+  };
+
   return (
     <div className="space-y-6" data-testid="crm-page">
       <div className="flex items-end justify-between flex-wrap gap-4">
@@ -477,6 +489,7 @@ export default function CRMPage() {
         onSaved={onSaved}
         onDelete={onDelete}
         onOnboarded={onOnboarded}
+        onCreateQuotation={onCreateQuotation}
       />
     </div>
   );

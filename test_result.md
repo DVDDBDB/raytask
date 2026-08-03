@@ -270,6 +270,68 @@ backend:
             
             Phase 2 CRM backend implementation is fully functional and ready for production.
 
+  - task: "Billing (Phase 3) — Quotations & Invoices with unique numbering + status timeline"
+    implemented: true
+    working: true
+    file: "backend/models.py, backend/routes_billing.py, backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            New models: LineItem, QuotationCreate/Update, InvoiceCreate/Update;
+            constants QUOTATION_STATUSES=[draft,sent,accepted,rejected],
+            INVOICE_STATUSES=[draft,sent,paid,overdue].
+            /api/quotations and /api/invoices with GET/POST/PATCH/DELETE, /statuses,
+            /{id}/send (in-app notify + timestamps), /quotations/{id}/mark-status,
+            /invoices/{id}/mark-paid, /invoices/{id}/mark-status,
+            /invoices/from-quotation/{qid}. Auto-numbering RB-Q-YYYY-NNNN and
+            RB-INV-YYYY-NNNN via db.counters atomic $inc. Server-side totals
+            (subtotal + gst_amount + total, per-line line_total & line_gst).
+            All gated by require_crm_access. Delete restricted to creator or admin+.
+        - working: true
+          agent: "testing"
+          comment: |
+            Comprehensive testing completed. All 21 test cases PASSED:
+            ✅ Test 1: Login as super admin - successful
+            ✅ Test 2: GET /quotations/statuses - 200, returns ["draft","sent","accepted","rejected"]
+            ✅ Test 3: GET /invoices/statuses - 200, returns ["draft","sent","paid","overdue"]
+            ✅ Test 4: POST /quotations - 200, number=RB-Q-2026-0001, status=draft, subtotal=86000, gst_amount=15480, total=101480, line items have correct line_total and line_gst
+            ✅ Test 5: POST /quotations (second) - 200, number increments to RB-Q-2026-0002
+            ✅ Test 6: GET /quotations?status=draft - 200, returns 2 quotations
+            ✅ Test 7: PATCH /quotations/{id} with new items - 200, subtotal=60000, gst_amount=10800, total=70800
+            ✅ Test 8: PATCH /quotations/{id} with invalid status - 400 (correctly rejected)
+            ✅ Test 9: POST /quotations/{id}/send - 200, status=sent, sent_at set, email_queued=false
+            ✅ Test 10: POST /quotations/{id}/send with empty items - 400 (correctly rejected)
+            ✅ Test 11: POST /quotations/{id}/mark-status {status:"accepted"} - 200, status=accepted, accepted_at set
+            ✅ Test 12: POST /invoices/from-quotation/{qid} - 200, number=RB-INV-2026-0001, quotation_id linked, items cloned with new IDs, totals match
+            ✅ Test 13: POST /invoices - 200, number=RB-INV-2026-0002 (incremented)
+            ✅ Test 14: PATCH /invoices/{id} {due_date:"2026-09-15"} - 200
+            ✅ Test 15: POST /invoices/{id}/send - 200, status=sent, sent_at set
+            ✅ Test 16: POST /invoices/{id}/mark-paid - 200, status=paid, paid_at set
+            ✅ Test 17: POST /invoices/{id}/mark-status {status:"overdue"} - 200, status=overdue
+            ✅ Test 18: RBAC cycle - (a) Priya without CRM → 403, (b) Grant CRM → 200, (c) Priya with CRM → 200, (d) Revoke CRM → 200, (e) Priya without CRM → 403
+            ✅ Test 19: Delete rules - (a) Priya (not creator, not admin) → 403, (b) Super admin → 200, (c) Non-existent → 404, (d) Priya's CRM revoked
+            ✅ Test 20: Regression - dashboard, tasks, costs, leads/stages all return 200
+            ✅ Test 21: Cleanup - All test quotations, invoices, and counters deleted; Priya's crm_access set to false
+            
+            VERIFIED FUNCTIONALITY:
+            - Auto-numbering working correctly (RB-Q-YYYY-NNNN and RB-INV-YYYY-NNNN format)
+            - Sequential numbering increments properly via atomic $inc on db.counters
+            - Server-side totals computation accurate (subtotal, gst_amount, total)
+            - Per-line calculations correct (line_total, line_gst)
+            - Status validation working (rejects invalid statuses with 400)
+            - Send endpoints validate non-empty items (400 for empty)
+            - Status transitions set correct timestamps (sent_at, accepted_at, rejected_at, paid_at)
+            - Invoice from quotation clones items with new IDs and preserves totals
+            - RBAC correctly enforces require_crm_access (super_admin/admin/CRM users only)
+            - Delete restrictions enforced (creator or admin+ only)
+            - No regressions in existing endpoints (dashboard, tasks, costs, leads)
+            
+            Phase 3 Billing backend implementation is fully functional and ready for production.
+
 test_plan:
   current_focus: []
   stuck_tasks: []
@@ -398,3 +460,65 @@ agent_communication:
         - No regressions in existing endpoints (dashboard, tasks, costs all working)
         
         Phase 2 CRM backend implementation is fully functional and ready for production.
+
+    - agent: "main"
+      message: |
+        Please verify Phase 3 Billing backend only. Do NOT touch the frontend.
+        Auth:
+          - Super Admin: superadmin@raybotix.com / Admin@123
+          - Team member (no CRM by default): priya@raybotix.com / Password@123
+          - Base URL: read frontend/.env → REACT_APP_BACKEND_URL, append /api.
+
+        WHAT WAS BUILT
+        - /api/quotations CRUD + /statuses + /send + /mark-status; auto-number RB-Q-YYYY-NNNN.
+        - /api/invoices CRUD + /statuses + /send + /mark-paid + /mark-status +
+          /from-quotation/{qid}; auto-number RB-INV-YYYY-NNNN.
+        - LineItem: {description, qty, rate, gst_pct, line_total, line_gst}.
+          Server computes subtotal, gst_amount, total on create/update.
+        - All endpoints gated by require_crm_access (super_admin/admin/CRM users).
+        - Delete restricted to creator or admin+.
+
+        TESTS (all must pass)
+        1. Login as super admin.
+        2. GET /api/quotations/statuses → 200 == ["draft","sent","accepted","rejected"].
+        3. GET /api/invoices/statuses → 200 == ["draft","sent","paid","overdue"].
+        4. POST /api/quotations with items=[{description:"Landing page",qty:1,rate:50000,gst_pct:18},{description:"SEO",qty:3,rate:12000,gst_pct:18}], client_name:"Rahul Sharma", client_company:"RSD Studios", valid_till:"2026-09-30" → 200 with number matching /^RB-Q-\d{4}-\d{4}$/, status="draft", subtotal=86000, gst_amount=15480, total=101480, each item has line_total and line_gst set.
+        5. Repeat POST → number increments by 1.
+        6. GET /api/quotations?status=draft → 200 with 2 rows.
+        7. PATCH /api/quotations/{id} { notes:"Includes 2 revisions", items:[{description:"Landing page",qty:1,rate:60000,gst_pct:18}] } → 200 with subtotal=60000, gst_amount=10800, total=70800.
+        8. PATCH /api/quotations/{id} { status:"foo" } → 400.
+        9. POST /api/quotations/{id}/send → 200 status="sent", sent_at set, email_queued=false.
+        10. POST /api/quotations/{id2}/send with empty items → 400 (create a fresh quotation with items=[]).
+        11. POST /api/quotations/{id}/mark-status {status:"accepted"} → 200 status="accepted", accepted_at set.
+        12. POST /api/invoices/from-quotation/{qid} → 200 new number RB-INV-YYYY-0001, items cloned (new ids), totals equal quotation totals, quotation_id=qid.
+        13. POST /api/invoices with items + client_name → 200 with next RB-INV number.
+        14. PATCH /api/invoices/{id} { due_date:"2026-09-15" } → 200.
+        15. POST /api/invoices/{id}/send → 200 status="sent", sent_at set.
+        16. POST /api/invoices/{id}/mark-paid → 200 status="paid", paid_at set.
+        17. POST /api/invoices/{id}/mark-status {status:"overdue"} → 200 status="overdue".
+        18. RBAC: as Priya (no CRM), GET /api/quotations → 403. Grant CRM (PATCH /api/users/{priya}) → 200. Now GET /api/quotations → 200. Revoke → 403 again.
+        19. Delete rules: with a second CRM-enabled non-admin user, DELETE a quotation created by super admin → 403. Super admin DELETE → 200. Non-existent DELETE → 404.
+        20. Regression: /api/analytics/dashboard 200, /api/tasks?scope=all 200, /api/analytics/costs?range=month 200, /api/leads/stages 200.
+        21. CLEANUP: delete all quotations/invoices/counters; revoke Priya's crm_access.
+
+        Do NOT run frontend tests.
+
+
+    - agent: "testing"
+      message: |
+        ✅ Phase 3 Billing backend verification COMPLETE. All 21 test cases PASSED.
+        
+        VERIFIED FUNCTIONALITY:
+        - Auto-numbering working correctly (RB-Q-YYYY-NNNN and RB-INV-YYYY-NNNN format)
+        - Sequential numbering increments properly via atomic $inc on db.counters
+        - Server-side totals computation accurate (subtotal, gst_amount, total)
+        - Per-line calculations correct (line_total, line_gst)
+        - Status validation working (rejects invalid statuses with 400)
+        - Send endpoints validate non-empty items (400 for empty)
+        - Status transitions set correct timestamps (sent_at, accepted_at, rejected_at, paid_at)
+        - Invoice from quotation clones items with new IDs and preserves totals
+        - RBAC correctly enforces require_crm_access (super_admin/admin/CRM users only)
+        - Delete restrictions enforced (creator or admin+ only)
+        - No regressions in existing endpoints (dashboard, tasks, costs, leads)
+        
+        Phase 3 Billing backend implementation is fully functional and ready for production.

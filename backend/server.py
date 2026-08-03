@@ -22,6 +22,7 @@ from routes_files import router as files_router  # noqa: E402
 from routes_exports import router as exports_router  # noqa: E402
 from routes_ws import router as ws_router  # noqa: E402
 from routes_leads import router as leads_router  # noqa: E402
+from routes_billing import router as billing_router  # noqa: E402
 from seed import seed  # noqa: E402
 import recurring  # noqa: E402
 import autostop  # noqa: E402
@@ -50,6 +51,7 @@ api_router.include_router(files_router)
 api_router.include_router(exports_router)
 api_router.include_router(ws_router)
 api_router.include_router(leads_router)
+api_router.include_router(billing_router)
 
 app.include_router(api_router)
 

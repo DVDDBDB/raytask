@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   LayoutDashboard, ListTodo, FolderKanban, Calendar, MessagesSquare,
   Bell, BarChart3, Wallet, Users, Settings as SettingsIcon,
-  History, LogOut, Sun, Moon, Monitor, Menu, Download, X, Briefcase,
+  History, LogOut, Sun, Moon, Monitor, Menu, Download, X, Briefcase, Receipt,
 } from "lucide-react";
 import api from "@/lib/api";
 import { toast } from "sonner";
@@ -44,6 +44,7 @@ const navByRole = {
     { to: "/analytics", icon: BarChart3, label: "Analytics" },
     { to: "/cost-analytics", icon: Wallet, label: "Cost Analytics" },
     { to: "/crm", icon: Briefcase, label: "CRM" },
+    { to: "/billing", icon: Receipt, label: "Billing" },
     { to: "/staff", icon: Users, label: "Staff" },
     { to: "/activity", icon: History, label: "Activity Log" },
   ],
@@ -57,6 +58,7 @@ const navByRole = {
     { to: "/analytics", icon: BarChart3, label: "Analytics" },
     { to: "/cost-analytics", icon: Wallet, label: "Cost Analytics" },
     { to: "/crm", icon: Briefcase, label: "CRM" },
+    { to: "/billing", icon: Receipt, label: "Billing" },
     { to: "/staff", icon: Users, label: "Staff Management" },
     { to: "/activity", icon: History, label: "Activity Logs" },
     { to: "/settings", icon: SettingsIcon, label: "Settings" },
@@ -166,10 +168,13 @@ export default function Layout() {
     if (user.role === "super_admin" || user.role === "admin") return baseItems;
     if (!user.crm_access) return baseItems;
     if (baseItems.some((i) => i.to === "/crm")) return baseItems;
-    // Insert CRM before Notifications for team_member/manager
+    // Insert CRM + Billing before Notifications for team_member/manager
     const insertAt = Math.max(0, baseItems.findIndex((i) => i.to === "/notifications"));
     const next = [...baseItems];
-    next.splice(insertAt, 0, { to: "/crm", icon: Briefcase, label: "CRM" });
+    next.splice(insertAt, 0,
+      { to: "/crm", icon: Briefcase, label: "CRM" },
+      { to: "/billing", icon: Receipt, label: "Billing" },
+    );
     return next;
   }, [user, baseItems]);
   const [mobileOpen, setMobileOpen] = useState(false);

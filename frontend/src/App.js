@@ -23,6 +23,7 @@ import Settings from "@/pages/Settings";
 import Profile from "@/pages/Profile";
 import ActivityLog from "@/pages/ActivityLog";
 import CRMPage from "@/pages/CRMPage";
+import BillingPage from "@/pages/BillingPage";
 
 function Private({ children, roles }) {
   const { user, loading } = useAuth();
@@ -62,6 +63,8 @@ function AppRoutes() {
                element={<Private roles={["super_admin", "admin"]}><CostAnalytics /></Private>} />
         <Route path="crm"
                element={<PrivateCRM><CRMPage /></PrivateCRM>} />
+        <Route path="billing"
+               element={<PrivateCRM><BillingPage /></PrivateCRM>} />
         <Route path="staff"
                element={<Private roles={["super_admin", "admin"]}><StaffManagement /></Private>} />
         <Route path="settings"

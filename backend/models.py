@@ -273,3 +273,81 @@ class LeadOnboardRequest(BaseModel):
     end_date: Optional[str] = None
     description: Optional[str] = None
 
+
+
+
+# ---------- Billing: Quotations & Invoices ----------
+QUOTATION_STATUSES = ["draft", "sent", "accepted", "rejected"]
+INVOICE_STATUSES = ["draft", "sent", "paid", "overdue"]
+
+
+class LineItem(BaseModel):
+    id: str = Field(default_factory=uid)
+    description: str
+    qty: float = 1.0
+    rate: float = 0.0
+    gst_pct: float = 18.0
+    # Computed (server-side) but returned so the UI can display saved values
+    line_total: float = 0.0
+    line_gst: float = 0.0
+
+
+class QuotationCreate(BaseModel):
+    lead_id: Optional[str] = None
+    project_id: Optional[str] = None
+    client_name: str = ""
+    client_company: str = ""
+    client_email: str = ""
+    client_phone: str = ""
+    client_address: str = ""
+    items: List[LineItem] = Field(default_factory=list)
+    notes: str = ""
+    terms: str = ""
+    valid_till: Optional[str] = None
+    currency: str = "INR"
+
+
+class QuotationUpdate(BaseModel):
+    client_name: Optional[str] = None
+    client_company: Optional[str] = None
+    client_email: Optional[str] = None
+    client_phone: Optional[str] = None
+    client_address: Optional[str] = None
+    items: Optional[List[LineItem]] = None
+    notes: Optional[str] = None
+    terms: Optional[str] = None
+    valid_till: Optional[str] = None
+    status: Optional[str] = None
+    lead_id: Optional[str] = None
+    project_id: Optional[str] = None
+
+
+class InvoiceCreate(BaseModel):
+    lead_id: Optional[str] = None
+    project_id: Optional[str] = None
+    quotation_id: Optional[str] = None
+    client_name: str = ""
+    client_company: str = ""
+    client_email: str = ""
+    client_phone: str = ""
+    client_address: str = ""
+    items: List[LineItem] = Field(default_factory=list)
+    notes: str = ""
+    terms: str = ""
+    due_date: Optional[str] = None
+    currency: str = "INR"
+
+
+class InvoiceUpdate(BaseModel):
+    client_name: Optional[str] = None
+    client_company: Optional[str] = None
+    client_email: Optional[str] = None
+    client_phone: Optional[str] = None
+    client_address: Optional[str] = None
+    items: Optional[List[LineItem]] = None
+    notes: Optional[str] = None
+    terms: Optional[str] = None
+    due_date: Optional[str] = None
+    status: Optional[str] = None
+    lead_id: Optional[str] = None
+    project_id: Optional[str] = None
